@@ -18,6 +18,7 @@ export type FeaturePage = {
     label: string;
     value: string;
   }>;
+  showMetrics?: boolean;
   useCases: string[];
   differentiators: string[];
   related: Array<{
@@ -70,6 +71,7 @@ export const featurePages = {
       { label: "CPC", value: "Commercial signal" },
       { label: "SERP results", value: "Search context" },
     ],
+    showMetrics: true,
     useCases: [
       "Build a content roadmap from real keyword data.",
       "Find lower-competition variants before writing.",
@@ -145,6 +147,7 @@ export const featurePages = {
       { label: "Affected pages", value: "Scope" },
       { label: "Audit history", value: "Progress" },
     ],
+    showMetrics: true,
     useCases: [
       "Audit a new site before publishing SEO work.",
       "Find technical issues after a migration or redesign.",
@@ -217,6 +220,7 @@ export const featurePages = {
       { label: "Target URLs", value: "Distribution" },
       { label: "Rank and spam signals", value: "Quality context" },
     ],
+    showMetrics: true,
     useCases: [
       "See who links to a competitor.",
       "Inspect link opportunities for important pages.",
@@ -257,14 +261,14 @@ export const featurePages = {
     slug: FEATURE_PAGE_SLUGS.domainOverview,
     eyebrow: "Domain Overview",
     navDescription: "Analyze competitor visibility.",
-    title: "Domain analysis tool for competitor SEO research",
+    title: "Domain overview: traffic, keywords, and pages for any domain",
     description:
-      "Review a domain's estimated organic traffic, organic keyword count, and ranking keyword and page data before deciding where to compete.",
-    primaryKeyword: "domain analysis tool",
+      "Get a domain overview of any website: estimated organic traffic, ranking keywords, and top organic pages, with one click into backlink and keyword research.",
+    primaryKeyword: "domain overview",
     secondaryKeywords: [
+      "domain analysis tool",
       "competitor keyword analysis tool",
       "website traffic checker",
-      "competitor analysis seo tool",
     ],
     imageAlt: "OpenSEO domain overview",
     imageSrc:
@@ -292,6 +296,7 @@ export const featurePages = {
       { label: "Top keywords", value: "Rankings" },
       { label: "Top pages", value: "Organic reach" },
     ],
+    showMetrics: true,
     useCases: [
       "Research a competitor before writing a content plan.",
       "Estimate a site's organic footprint.",
@@ -312,9 +317,14 @@ export const featurePages = {
     ],
     faqs: [
       {
-        question: "What does a domain analysis tool show?",
+        question: "What is a domain overview?",
         answer:
-          "It summarizes a domain's organic footprint, including estimated traffic, organic keyword count, ranking keywords, and top organic pages.",
+          "A domain overview is a snapshot of a website's organic search footprint: estimated organic traffic, how many keywords it ranks for, its top ranking keywords, and its top organic pages. It's usually the first step in competitor research because it shows where a site earns its visibility.",
+      },
+      {
+        question: "How does this compare to Semrush Domain Overview?",
+        answer:
+          "OpenSEO covers the core of the same report (estimated traffic, organic keywords, top keywords, and top pages) without a triple-digit monthly seat. OpenSEO is open source, so you can self-host it, and the managed app is $10/month and includes usage credits.",
       },
       {
         question: "Can OpenSEO help with competitor keyword analysis?",
@@ -367,6 +377,7 @@ export const featurePages = {
       { label: "SERP features", value: "Context" },
       { label: "Position change", value: "Movement" },
     ],
+    showMetrics: true,
     useCases: [
       "Monitor target keywords after publishing content.",
       "Track launch, migration, and optimization impact.",

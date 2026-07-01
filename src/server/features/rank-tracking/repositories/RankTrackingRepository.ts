@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, lte, max } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, lte, max } from "drizzle-orm";
 import type { InferInsertModel } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -12,6 +12,9 @@ import {
   getLatestSnapshotsForKeywords,
   getSnapshotsBeforeDate,
   getEarliestSnapshotsForKeywords,
+  getKeywordHistory,
+  getConfigTrend,
+  getPositionMatrix,
 } from "./snapshotQueries";
 
 const DB_BATCH_SIZE = 100;
@@ -127,6 +130,7 @@ async function getDueConfigsWithOrganization(nowIso: string) {
       and(
         eq(rankTrackingConfigs.isActive, true),
         lte(rankTrackingConfigs.nextCheckAt, nowIso),
+        isNull(projects.archivedAt),
       ),
     )
     .limit(50);
@@ -380,4 +384,7 @@ export const RankTrackingRepository = {
   getLatestSnapshotsForKeywords,
   getSnapshotsBeforeDate,
   getEarliestSnapshotsForKeywords,
+  getKeywordHistory,
+  getConfigTrend,
+  getPositionMatrix,
 };

@@ -9,16 +9,6 @@ import {
 import { sql } from "drizzle-orm";
 import { organization, user } from "./better-auth-schema";
 
-// This stores users for Cloudflare Access and local_noauth mode
-// since they don't map to better-auth's user schema
-export const delegatedUsers = sqliteTable("delegated_users", {
-  id: text("id").primaryKey(),
-  email: text("email").notNull().unique(),
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(current_timestamp)`),
-});
-
 export const userOnboardingAnswers = sqliteTable(
   "user_onboarding_answers",
   {
@@ -34,6 +24,10 @@ export const userOnboardingAnswers = sqliteTable(
     foundVia: text("found_via"),
     mcpSetupIntent: text("mcp_setup_intent"),
     completedAt: text("completed_at"),
+    // Set when the user resolves the Search Console ask, either in current
+    // onboarding or via the one-time re-engagement nudge for legacy users.
+    // Null = not yet shown/resolved.
+    gscNudgeDismissedAt: text("gsc_nudge_dismissed_at"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(current_timestamp)`),
@@ -56,9 +50,16 @@ export const projects = sqliteTable(
       .references(() => organization.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     domain: text("domain"),
+    // Default DataForSEO location/language for the project, set during
+    // onboarding and reused by every project-scoped data call.
+    locationCode: integer("location_code").notNull().default(2840),
+    languageCode: text("language_code").notNull().default("en"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(current_timestamp)`),
+    // Soft delete: archived projects are hidden everywhere but their data
+    // (keywords, rank tracking, audits) is preserved.
+    archivedAt: text("archived_at"),
   },
   (table) => [
     // Only the auto-created Default/null-domain project is a singleton. This
@@ -67,7 +68,9 @@ export const projects = sqliteTable(
     // creating multiple projects with the same name or domain later.
     uniqueIndex("projects_one_default_per_organization_idx")
       .on(table.organizationId)
-      .where(sql`${table.name} = 'Default' AND ${table.domain} IS NULL`),
+      .where(
+        sql`${table.name} = 'Default' AND ${table.domain} IS NULL AND ${table.archivedAt} IS NULL`,
+      ),
   ],
 );
 
@@ -212,7 +215,7 @@ export const rankTrackingConfigs = sqliteTable(
       .default("both"),
     serpDepth: integer("serp_depth").notNull(),
     scheduleInterval: text("schedule_interval", {
-      enum: ["daily", "weekly", "manual"],
+      enum: ["daily", "weekly", "monthly", "manual"],
     })
       .notNull()
       .default("weekly"),

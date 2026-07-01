@@ -4,7 +4,8 @@ import { getFieldError, getFormError } from "@/client/lib/forms";
 import type { DomainOverviewControlsForm } from "@/client/features/domain/DomainOverviewPage";
 import { toSortMode } from "@/client/features/domain/utils";
 import type { DomainSortMode } from "@/client/features/domain/types";
-import { LOCATION_OPTIONS } from "@/client/features/keywords/locations";
+import { LABS_LOCATION_OPTIONS } from "@/client/features/keywords/locations";
+import { LocationSelect } from "@/client/components/LocationSelect";
 
 type Props = {
   controlsForm: DomainOverviewControlsForm;
@@ -54,21 +55,15 @@ export function DomainSearchCard({
 
           <controlsForm.Field name="locationCode">
             {(field) => (
-              <select
-                className="select select-bordered shrink-0"
+              <LocationSelect
                 value={field.state.value}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  field.handleChange(next);
-                  onLocationChange(next);
+                options={LABS_LOCATION_OPTIONS}
+                className="w-full lg:w-44 lg:shrink-0"
+                onChange={(code) => {
+                  field.handleChange(code);
+                  onLocationChange(code);
                 }}
-              >
-                {LOCATION_OPTIONS.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              />
             )}
           </controlsForm.Field>
 

@@ -7,6 +7,7 @@ import { withMcpProjectAuth } from "@/server/mcp/project-auth";
 import {
   DEFAULT_LANGUAGE_CODE,
   DEFAULT_LOCATION_CODE,
+  assertLabsLocationCode,
   languageCodeSchema,
   locationCodeSchema,
   projectIdSchema,
@@ -15,7 +16,11 @@ import {
 const inputSchema = {
   projectId: projectIdSchema,
   domain: z.string().min(1).describe("Domain to analyze (e.g. 'example.com')."),
-  includeSubdomains: z.boolean().optional().default(false),
+  includeSubdomains: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Include subdomains in the domain's metrics. Defaults to false."),
   locationCode: locationCodeSchema.optional(),
   languageCode: languageCodeSchema.optional(),
 } as const;
@@ -46,6 +51,7 @@ export const getDomainOverviewTool = {
     },
   },
   handler: withMcpProjectAuth(async (args: Args, context) => {
+    assertLabsLocationCode(args.locationCode);
     const result = await DomainService.getOverview(
       {
         projectId: args.projectId,

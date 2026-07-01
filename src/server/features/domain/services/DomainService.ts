@@ -1,11 +1,19 @@
 import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
 import { z } from "zod";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
-import { createDataforseoClient } from "@/server/lib/dataforseoClient";
+import type { CreditFeature } from "@/shared/billing-credit-features";
+import { createDataforseoClient } from "@/server/lib/dataforseo";
 import { normalizeDomainInput } from "@/server/lib/domainUtils";
 import { mapKeywordItem } from "@/server/features/domain/services/domainKeywordMapper";
 import { getKeywordsPage } from "@/server/features/domain/services/domainKeywordsPage";
 import { getPagesPage } from "@/server/features/domain/services/domainPagesPage";
+
+// Lets a caller attribute spend to its own feature (e.g. onboarding). Applied
+// to the DataForSEO call, not the cache key, so cached results are shared
+// across callers.
+type MeteringOverrides = {
+  creditFeature?: CreditFeature;
+};
 
 /** Domain overview data is refreshed every 12 hours. */
 const DOMAIN_OVERVIEW_TTL_SECONDS = 12 * 60 * 60;
@@ -31,6 +39,7 @@ async function getOverview(
     languageCode: string;
   },
   billingCustomer: BillingCustomerContext,
+  metering: MeteringOverrides = {},
 ): Promise<DomainOverviewResult> {
   const domain = normalizeDomainInput(input.domain, input.includeSubdomains);
 
@@ -56,6 +65,7 @@ async function getOverview(
     target: domain,
     locationCode: input.locationCode,
     languageCode: input.languageCode,
+    ...metering,
   });
 
   const metrics = metricsResponse[0];
@@ -99,6 +109,7 @@ async function getSuggestedKeywords(
     projectId: string;
   },
   billingCustomer: BillingCustomerContext,
+  metering: MeteringOverrides = {},
 ): Promise<
   Array<{
     keyword: string;
@@ -109,7 +120,7 @@ async function getSuggestedKeywords(
     keywordDifficulty: number | null;
   }>
 > {
-  const domain = input.domain.toLowerCase().trim();
+  const domain = normalizeDomainInput(input.domain, true);
 
   const cacheKey = await buildCacheKey("domain:keyword-suggestions", {
     organizationId: billingCustomer.organizationId,
@@ -144,6 +155,7 @@ async function getSuggestedKeywords(
     languageCode: input.languageCode,
     limit: 100,
     orderBy: ["ranked_serp_element.serp_item.etv,desc"],
+    ...metering,
   });
 
   const keywords = rankedKeywordsResponse.items

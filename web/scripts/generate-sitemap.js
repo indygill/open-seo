@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const DIST_DIR = join(__dirname, "../dist/client");
-const GUIDE_CONTENT_DIR = join(__dirname, "../content/guides");
+const BLOG_CONTENT_DIR = join(__dirname, "../content/blogs");
 const DOCS_CONTENT_DIR = join(__dirname, "../content/docs");
 
 const DEFAULT_SITE_URL = "https://openseo.so";
@@ -20,14 +20,21 @@ const STATIC_PATHS = [
   "/pricing",
   "/privacy",
   "/terms-and-conditions",
-  "/guides",
+  "/blogs",
   "/docs",
   "/features",
   "/features/mcp",
+  "/open-source-seo",
+  "/google-search-console-mcp",
   ...Object.values(FEATURE_PAGE_SLUGS).map((slug) => `/features/${slug}`),
 ];
 
-function getContentEntries(contentDir, basePath, dir = contentDir, segments = []) {
+function getContentEntries(
+  contentDir,
+  basePath,
+  dir = contentDir,
+  segments = [],
+) {
   if (!existsSync(dir)) {
     return [];
   }
@@ -83,7 +90,7 @@ function main() {
     entries.set(path, { path, lastmod: null });
   }
   for (const entry of [
-    ...getContentEntries(GUIDE_CONTENT_DIR, "/guides"),
+    ...getContentEntries(BLOG_CONTENT_DIR, "/blogs"),
     ...getContentEntries(DOCS_CONTENT_DIR, "/docs"),
   ]) {
     entries.set(entry.path, entry);

@@ -24,9 +24,10 @@ const toolCategories: ToolCategory[] = [
         description: "Read tracked keyword positions.",
       },
       {
-        name: "get_keyword_search_volume",
-        title: "Get keyword search volume",
-        description: "Check Google Ads volume and CPC for keyword demand.",
+        name: "get_keyword_metrics",
+        title: "Get keyword metrics",
+        description:
+          "Volume, difficulty, intent, CPC, and trends for any keyword list.",
       },
       {
         name: "list_saved_keywords",
@@ -73,6 +74,11 @@ const toolCategories: ToolCategory[] = [
         title: "Get backlinks overview",
         description: "Check backlink and referring-domain stats.",
       },
+      {
+        name: "get_backlinks_profile",
+        title: "Get backlinks profile",
+        description: "Fetch paginated link-level backlink rows.",
+      },
     ],
   },
   {
@@ -92,6 +98,23 @@ const toolCategories: ToolCategory[] = [
         name: "get_google_business_questions",
         title: "Get business questions",
         description: "Read Google Business Profile Q&A rows.",
+      },
+    ],
+  },
+  {
+    label: "Search Console",
+    tools: [
+      {
+        name: "get_search_console_performance",
+        title: "Get Search Console performance",
+        description:
+          "Read clicks, impressions, CTR, and position from Search Console.",
+      },
+      {
+        name: "inspect_urls",
+        title: "Inspect URLs",
+        description:
+          "Check index status, crawl, and canonical for up to 10 URLs.",
       },
     ],
   },

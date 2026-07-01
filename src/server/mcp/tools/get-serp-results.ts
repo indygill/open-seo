@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createDataforseoClient } from "@/server/lib/dataforseoClient";
+import { createDataforseoClient } from "@/server/lib/dataforseo";
 import { mcpResponse } from "@/server/mcp/formatters";
 import { buildProjectMeta } from "@/server/mcp/context";
 import { optionalMetaOutputSchema } from "@/server/mcp/output-schemas";
@@ -13,7 +13,7 @@ import {
 } from "@/server/mcp/schemas";
 
 const querySchema = z.object({
-  keyword: z.string().min(1),
+  keyword: z.string().min(1).describe("Search query to fetch the SERP for."),
   locationCode: locationCodeSchema.optional(),
   languageCode: languageCodeSchema.optional(),
 });

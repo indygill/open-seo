@@ -1,7 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { getOnboardingAnswers } from "@/serverFunctions/onboarding";
 
-export const ONBOARDING_LAST_STEP = 3;
+export const ONBOARDING_LAST_STEP = 4;
 
 export const INTEREST_OPTIONS = [
   "AI workflows with Claude or Codex (MCP)",
@@ -14,8 +14,8 @@ export const INTEREST_OPTIONS = [
 ] as const;
 
 export const WORK_FOR_OPTIONS = [
-  "My clients",
   "My own startup or business",
+  "My clients",
   "My employer's website",
   "My own side project",
   "I'm exploring before choosing a project",

@@ -40,7 +40,7 @@ export const getBacklinksOverviewTool = {
   config: {
     title: "Get backlinks overview",
     description:
-      "Returns a backlinks profile summary (total backlinks, referring domains, top referring domains). Charges credits (~200-500 typical). Requires that the user's DataForSEO account has Backlinks enabled.",
+      "Returns a backlinks profile summary (total backlinks, referring domains, top referring domains). Charges credits (~50 typical for a domain, ~25 for a single page). Self-hosted deployments need the Backlinks API enabled on their DataForSEO account.",
     inputSchema,
     outputSchema: {
       overview: looseObjectOutputSchema,
@@ -57,24 +57,28 @@ export const getBacklinksOverviewTool = {
     const lookup = { target: args.target, scope: args.scope };
     const spamOptions = { hideSpam: args.hideSpam ?? true };
     const [overview, refDomains] = await Promise.all([
-      BacklinksService.profileOverview(lookup, context.billing, spamOptions),
-      BacklinksService.profileReferringDomains(
-        lookup,
+      BacklinksService.profileOverview(lookup, context.billing),
+      BacklinksService.profileReferringDomainsPage(
+        {
+          ...lookup,
+          page: 1,
+          pageSize: 100,
+          sortField: "backlinks",
+          sortOrder: "desc",
+          filters: {},
+        },
         context.billing,
         spamOptions,
       ),
     ]);
     const topDomains = refDomains.rows ?? [];
-    const overviewRecord =
-      overview && typeof overview === "object"
-        ? (overview as Record<string, unknown>)
-        : {};
+    const summary = overview.overview.summary;
     const text = [
       `Backlinks profile for ${args.target} (${args.scope ?? "domain"}):`,
-      `- backlinks: ${formatMetric(overviewRecord.backlinks)}`,
-      `- referring domains: ${formatMetric(overviewRecord.referring_domains)}`,
-      `- referring pages: ${formatMetric(overviewRecord.referring_pages)}`,
-      `- rank: ${formatMetric(overviewRecord.rank)}`,
+      `- backlinks: ${formatMetric(summary.backlinks)}`,
+      `- referring domains: ${formatMetric(summary.referringDomains)}`,
+      `- referring pages: ${formatMetric(summary.referringPages)}`,
+      `- rank: ${formatMetric(summary.rank)}`,
       "",
       `Top referring domains (${Math.min(topDomains.length, 10)} shown):`,
       ...topDomains

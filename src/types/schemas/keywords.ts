@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TAG_COLOR_KEYS } from "@/shared/tag-colors";
+import { booleanSearchParamSchema } from "@/types/schemas/domain";
 
 const savedKeywordTagSchema = z.string().trim().min(1).max(64);
 const tagColorSchema = z.enum(TAG_COLOR_KEYS);
@@ -26,6 +27,8 @@ export const researchKeywordsSchema = z.object({
     .enum(["auto", "related", "suggestions", "ideas"])
     .optional()
     .default("auto"),
+  // Clickstream-refined volumes double the DataForSEO request cost; opt-in.
+  clickstream: z.boolean().optional().default(false),
 });
 
 export const saveKeywordsSchema = z
@@ -140,6 +143,10 @@ export const deleteSavedKeywordTagSchema = z.object({
   tagId: z.string().min(1),
 });
 
+export const refreshSavedKeywordMetricsSchema = z.object({
+  projectId: z.string().min(1),
+});
+
 export type ResearchKeywordsInput = z.infer<typeof researchKeywordsSchema>;
 export type SaveKeywordsInput = z.infer<typeof saveKeywordsSchema>;
 export type RemoveSavedKeywordsInput = z.infer<
@@ -157,6 +164,10 @@ export type UpdateSavedKeywordTagInput = z.infer<
 >;
 export type DeleteSavedKeywordTagInput = z.infer<
   typeof deleteSavedKeywordTagSchema
+>;
+
+export type RefreshSavedKeywordMetricsInput = z.infer<
+  typeof refreshSavedKeywordMetricsSchema
 >;
 export const serpAnalysisSchema = z.object({
   projectId: z.string().min(1),
@@ -184,6 +195,7 @@ export const keywordsSearchSchema = z.object({
   loc: z.coerce.number().int().positive().optional(),
   kLimit: z.union([z.literal(150), z.literal(300), z.literal(500)]).optional(),
   mode: z.enum(keywordModes).optional(),
+  cs: booleanSearchParamSchema.optional(),
   sort: z.enum(keywordSortFields).optional(),
   order: z.enum(sortDirs).optional(),
   minVol: z.string().optional(),

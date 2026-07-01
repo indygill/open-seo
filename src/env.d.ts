@@ -6,6 +6,9 @@ declare namespace Cloudflare {
     R2: R2Bucket;
     OAUTH_KV: KVNamespace;
 
+    // Durable Object backing the onboarding strategy chat (see wrangler.jsonc).
+    ONBOARDING_CHAT: DurableObjectNamespace;
+
     AUTH_MODE?: "cloudflare_access" | "local_noauth" | "hosted";
     BYPASS_EMAIL_VERIFICATION?: string;
     TEAM_DOMAIN?: string;
@@ -19,9 +22,16 @@ declare namespace Cloudflare {
     LOOPS_API_KEY?: string;
     LOOPS_TRANSACTIONAL_VERIFY_EMAIL_ID?: string;
     LOOPS_TRANSACTIONAL_RESET_PASSWORD_ID?: string;
+    AUTUMN_SECRET_KEY?: string;
+    AUTUMN_WEBHOOK_SECRET?: string;
 
     // DataForSEO API Basic auth value (base64 of login:password)
     DATAFORSEO_API_KEY: string;
+
+    // OpenRouter API key for the onboarding chat.
+    OPENROUTER_API_KEY?: string;
+    // Optional OpenRouter model slug override (defaults in openrouter.ts).
+    OPENROUTER_MODEL?: string;
   }
 }
 
@@ -36,4 +46,9 @@ interface ImportMetaEnv {
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
+}
+
+declare module "*.md?raw" {
+  const content: string;
+  export default content;
 }

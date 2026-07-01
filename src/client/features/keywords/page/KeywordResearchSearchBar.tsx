@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { Info, Search } from "lucide-react";
 import { getFieldError } from "@/client/lib/forms";
 import {
   isResultLimit,
@@ -8,7 +8,8 @@ import {
   MAX_KEYWORDS_PER_SUBMIT,
   RESULT_LIMITS,
 } from "@/client/features/keywords/keywordResearchTypes";
-import { LOCATION_OPTIONS } from "@/client/features/keywords/locations";
+import { isLabsLocationCode } from "@/client/features/keywords/locations";
+import { LocationSelect } from "@/client/components/LocationSelect";
 import type { KeywordResearchControllerState } from "./types";
 
 type Props = {
@@ -70,19 +71,11 @@ export function KeywordResearchSearchBar({ controller }: Props) {
           <div className="grid grid-cols-2 gap-2 lg:contents">
             <controlsForm.Field name="locationCode">
               {(field) => (
-                <select
-                  className="select select-bordered w-full lg:w-auto lg:shrink-0"
+                <LocationSelect
                   value={field.state.value}
-                  onChange={(event) =>
-                    field.handleChange(Number(event.target.value))
-                  }
-                >
-                  {LOCATION_OPTIONS.map((option) => (
-                    <option key={option.code} value={option.code}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(code) => field.handleChange(code)}
+                  className="w-full lg:w-44 lg:shrink-0"
+                />
               )}
             </controlsForm.Field>
 
@@ -138,6 +131,49 @@ export function KeywordResearchSearchBar({ controller }: Props) {
               <p className="text-sm text-error">{keywordError}</p>
             ) : null;
           }}
+        </controlsForm.Field>
+        <controlsForm.Field name="locationCode">
+          {(locationField) =>
+            isLabsLocationCode(locationField.state.value) ? (
+              <controlsForm.Field name="clickstream">
+                {(field) => (
+                  <div className="flex items-center gap-2">
+                    <label className="label cursor-pointer justify-start gap-2 p-0">
+                      <input
+                        type="checkbox"
+                        className="toggle toggle-sm toggle-primary"
+                        checked={field.state.value}
+                        onChange={(event) =>
+                          field.handleChange(event.target.checked)
+                        }
+                      />
+                      <span className="text-sm font-medium text-base-content/80">
+                        Clickstream-refined volumes
+                      </span>
+                    </label>
+                    <div
+                      className="tooltip tooltip-right"
+                      data-tip="Google reports one combined search volume for similar keywords (e.g. 'seo tool' and 'seo tools'). Turn this on to estimate each keyword's own volume. Costs 2x the credits."
+                    >
+                      <Info className="size-3.5 text-base-content/50" />
+                    </div>
+                  </div>
+                )}
+              </controlsForm.Field>
+            ) : (
+              <div
+                className="flex items-start gap-2 rounded-lg border border-info/30 bg-info/10 px-3 py-2 text-sm text-base-content/80"
+                role="status"
+              >
+                <Info className="mt-0.5 size-4 shrink-0 text-info" />
+                <span>
+                  Keyword data for this country comes from Google Ads — search
+                  volume, CPC, and trends are available, but difficulty and
+                  intent are not.
+                </span>
+              </div>
+            )
+          }
         </controlsForm.Field>
       </div>
     </div>
