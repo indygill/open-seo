@@ -9,8 +9,16 @@ import {
 } from "@/server/billing/subscription";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import {
+  DataforseoChargedTaskError,
+  type DataforseoApiCallCost,
+  type DataforseoApiResponse,
+} from "@/server/lib/dataforseo/envelope";
+import {
   fetchBusinessListingsSearch,
+  fetchMyBusinessInfo,
   fetchQuestionsAnswers,
+  postGoogleReviewsTask,
+  postMyBusinessUpdatesTask,
 } from "@/server/lib/dataforseo/business";
 import {
   fetchBacklinksHistory,
@@ -47,19 +55,15 @@ import {
   fetchLlmResponse,
   fetchLlmTopPages,
 } from "@/server/lib/dataforseo/ai";
-import {
-  DataforseoChargedTaskError,
-  type DataforseoApiCallCost,
-  type DataforseoApiResponse,
-} from "@/server/lib/dataforseo/envelope";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
+import { AppError } from "@/server/lib/errors";
 
 export { mapDataforseoPathToCreditFeature };
 
 /**
  * Wraps a section fetcher with billing metering. Each entry on the client is
- * `meter(customer, fetcher, defaultFeature?)`, which returns a function with the
- * fetcher's own input type and resolves to its unwrapped `.data`.
+ * `meter(customer, fetchX, defaultFeature?)`, which returns a function with
+ * the fetcher's own input type and resolves to its unwrapped `.data`.
  *
  * `defaultFeature` is the fallback credit feature; a caller can override it per
  * call by passing `creditFeature` in the input (e.g. an MCP tool attributing
@@ -88,6 +92,11 @@ export function createDataforseoClient(customer: BillingCustomerContext) {
         "local_seo",
       ),
       questionsAnswers: meter(customer, fetchQuestionsAnswers, "local_seo"),
+      myBusinessInfo: meter(customer, fetchMyBusinessInfo, "local_seo"),
+      // task_post is where DataForSEO charges; collection runs unmetered
+      // through fetchBusinessDataTaskResult (see index.ts).
+      reviewsTaskPost: meter(customer, postGoogleReviewsTask, "local_seo"),
+      updatesTaskPost: meter(customer, postMyBusinessUpdatesTask, "local_seo"),
     },
     backlinks: {
       summary: meter(customer, fetchBacklinksSummary),
@@ -161,6 +170,14 @@ async function meterDataforseoCall<T>(
     result = await execute();
   } catch (error) {
     if (error instanceof DataforseoChargedTaskError) {
+      // A malformed request (DataForSEO "Invalid Field: ...") that DataForSEO
+      // did not bill returns no value to the customer, so don't charge — surface
+      // it as a non-reportable VALIDATION_ERROR. If DataForSEO still billed us
+      // (costUsd > 0), fall through to the normal charge + capture path so the
+      // spend stays metered and visible instead of silently eaten.
+      if (error.isInvalidField && error.billing.costUsd <= 0) {
+        throw new AppError("VALIDATION_ERROR", error.message);
+      }
       await trackDataforseoCost({
         customer,
         customerId: billingCustomer.id,

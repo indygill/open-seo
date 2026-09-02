@@ -9,6 +9,21 @@ declare namespace Cloudflare {
     // Durable Object backing the onboarding strategy chat (see wrangler.jsonc).
     ONBOARDING_CHAT: DurableObjectNamespace;
 
+    // Durable Object backing the SAM in-app agent (see wrangler.jsonc).
+    SAM_CHAT: DurableObjectNamespace;
+
+    // Durable Object holding per-audit crawl scratch state (frontier, link
+    // edges, page mirror). Bound ONLY in the open-seo-audit aux worker;
+    // untyped here — getAuditScratchpad narrows the stub.
+    AUDIT_SCRATCHPAD: DurableObjectNamespace;
+
+    // Service binding to the audit worker's AuditEngine entrypoint (cancel +
+    // GDPR erasure of scratchpad state). The inline import() is required: a
+    // top-level import would turn this ambient file into a module and break
+    // the global augmentation.
+    // oxlint-disable-next-line typescript-eslint/consistent-type-imports
+    AUDIT_ENGINE: Service<typeof import("./audit-worker").default>;
+
     AUTH_MODE?: "cloudflare_access" | "local_noauth" | "hosted";
     BYPASS_EMAIL_VERIFICATION?: string;
     TEAM_DOMAIN?: string;
@@ -17,18 +32,33 @@ declare namespace Cloudflare {
     POSTHOG_HOST?: string;
     BETTER_AUTH_SECRET?: string;
     BETTER_AUTH_URL?: string;
+    DATABASE_PROVIDER?: "d1" | "postgres";
+    HYPERDRIVE?: {
+      connectionString: string;
+    };
     GOOGLE_CLIENT_ID?: string;
     GOOGLE_CLIENT_SECRET?: string;
     LOOPS_API_KEY?: string;
     LOOPS_TRANSACTIONAL_VERIFY_EMAIL_ID?: string;
     LOOPS_TRANSACTIONAL_RESET_PASSWORD_ID?: string;
+    LOOPS_TRANSACTIONAL_INVITATION_ID?: string;
     AUTUMN_SECRET_KEY?: string;
     AUTUMN_WEBHOOK_SECRET?: string;
+    // Dub referral conversion tracking (hosted only); all Dub code no-ops
+    // when unset.
+    DUB_API_KEY?: string;
+    // HMAC secret for the operator-only GDPR storage-erasure endpoint.
+    GDPR_ERASURE_SECRET?: string;
+
+    // Cloudflare Turnstile — signup captcha (hosted only). Secret verifies
+    // tokens server-side; site key is public and inlined into the client build.
+    TURNSTILE_SECRET_KEY?: string;
+    TURNSTILE_SITE_KEY?: string;
 
     // DataForSEO API Basic auth value (base64 of login:password)
     DATAFORSEO_API_KEY: string;
 
-    // OpenRouter API key for the onboarding chat.
+    // OpenRouter API key for the in-app chat agents (onboarding + SAM).
     OPENROUTER_API_KEY?: string;
     // Optional OpenRouter model slug override (defaults in openrouter.ts).
     OPENROUTER_MODEL?: string;
@@ -37,9 +67,11 @@ declare namespace Cloudflare {
 
 interface ImportMetaEnv {
   readonly AUTH_MODE?: "cloudflare_access" | "local_noauth" | "hosted";
+  readonly DATABASE_PROVIDER?: "d1" | "postgres";
   readonly BYPASS_EMAIL_VERIFICATION?: string;
   readonly POSTHOG_PUBLIC_KEY?: string;
   readonly POSTHOG_HOST?: string;
+  readonly TURNSTILE_SITE_KEY?: string;
   readonly VITE_E2E_DOMAIN_FIXTURES?: string;
   readonly VITE_E2E_KEYWORD_FIXTURES?: string;
 }

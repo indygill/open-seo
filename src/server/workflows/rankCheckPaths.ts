@@ -10,8 +10,10 @@ import type {
   RankCheckResult,
   RankCheckTaskInput,
 } from "@/server/lib/dataforseo";
+import { AppError } from "@/server/lib/errors";
 import type { RankTrackingConfig } from "@/types/schemas/rank-tracking";
 import { KEYWORDS_PER_BATCH } from "@/shared/rank-tracking";
+import { pgStep } from "@/server/workflows/pgStep";
 
 const SINGLE_ATTEMPT_STEP_CONFIG = {
   retries: { limit: 0, delay: "1 second" as const },
@@ -47,6 +49,7 @@ interface CheckContext {
   domain: string;
   locationCode: number;
   languageCode: string;
+  locationName?: string;
   runId: string;
 }
 
@@ -89,6 +92,7 @@ async function checkBatchLive(
           keywordId: task.keywordId,
           locationCode: ctx.locationCode,
           languageCode: ctx.languageCode,
+          locationName: ctx.locationName,
           device: task.device,
           targetDomain: ctx.domain,
           depth: ctx.serpDepth,
@@ -97,16 +101,23 @@ async function checkBatchLive(
     ),
   );
   const results: RankCheckResultWithDevice[] = [];
-  for (const outcome of settled) {
+  settled.forEach((outcome, index) => {
     if (outcome.status === "fulfilled") {
       results.push(outcome.value);
-    } else {
-      console.error(
-        `[rank-check] ${ctx.runId} live call failed:`,
-        outcome.reason,
-      );
+      return;
     }
-  }
+    const reason: unknown = outcome.reason;
+    const code = reason instanceof AppError ? reason.code : "UNKNOWN";
+    const message = reason instanceof Error ? reason.message : String(reason);
+    // DataForSEO erring on its own side is a provider flake, not our bug: the
+    // keyword just misses this run and finalize reports it to the user. Every
+    // other rejection (no credits, bad API key) is ours and stays at error.
+    const log = code === "UPSTREAM_UNAVAILABLE" ? console.warn : console.error;
+    const task = tasks[index];
+    log(
+      `[rank-check] ${ctx.runId} live call failed (${code}) keyword="${task.keyword}" device=${task.device}: ${message}`,
+    );
+  });
   if (results.length > 0) {
     await RankTrackingRepository.insertSnapshots(
       mapResultsToSnapshotRows(ctx.runId, results),
@@ -131,7 +142,8 @@ export async function runLiveCheck(
     const batchIndex = Math.floor(i / KEYWORDS_PER_BATCH);
     const keywordsChecked = i + keywordBatch.length;
 
-    await step.do(
+    await pgStep(
+      step,
       `live-batch-${batchIndex}`,
       SINGLE_ATTEMPT_STEP_CONFIG,
       async () => {
@@ -162,7 +174,7 @@ const QUEUED_POLL_INTERVALS = [
 /** Concurrent task_get requests within a collect step. */
 const TASK_GET_CONCURRENCY = 25;
 
-/** Max task_get calls per collect round (per-invocation subrequest budget). */
+/** Max task_get calls per collect round (bounds one round's fan-out). */
 const TASK_GETS_PER_COLLECT = 500;
 
 // Collect steps may issue hundreds of task_get calls, so they get more room
@@ -283,7 +295,8 @@ export async function runQueuedCheck(
     const postIndex = Math.floor(i / MAX_TASKS_PER_POST);
     let posted: PostedRankCheckTask[];
     try {
-      posted = await step.do(
+      posted = await pgStep(
+        step,
         `post-tasks-${postIndex}`,
         SINGLE_ATTEMPT_STEP_CONFIG,
         async () =>
@@ -291,6 +304,7 @@ export async function runQueuedCheck(
             tasks: chunk,
             locationCode: ctx.locationCode,
             languageCode: ctx.languageCode,
+            locationName: ctx.locationName,
             depth: ctx.serpDepth,
             targetDomain: ctx.domain,
           }),
@@ -339,8 +353,11 @@ export async function runQueuedCheck(
 
     let outcome: CollectRoundOutcome;
     try {
-      outcome = await step.do(`collect-${round}`, COLLECT_STEP_CONFIG, () =>
-        collectQueuedRound(ctx, batch),
+      outcome = await pgStep(
+        step,
+        `collect-${round}`,
+        COLLECT_STEP_CONFIG,
+        () => collectQueuedRound(ctx, batch),
       );
     } catch (error) {
       console.warn(`[rank-check] ${ctx.runId} collect-${round} failed:`, error);
@@ -369,7 +386,8 @@ export async function runQueuedCheck(
     const batch = stragglers.slice(i, i + KEYWORDS_PER_BATCH);
     const batchIndex = Math.floor(i / KEYWORDS_PER_BATCH);
 
-    stats.fallbackChecked += await step.do(
+    stats.fallbackChecked += await pgStep(
+      step,
       `fallback-batch-${batchIndex}`,
       SINGLE_ATTEMPT_STEP_CONFIG,
       () => checkBatchLive(ctx, batch),

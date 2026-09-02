@@ -2,6 +2,7 @@ import { Monitor, Plus, Settings, Smartphone } from "lucide-react";
 import { SegmentedToggle } from "@/client/components/SegmentedToggle";
 import { LOCATIONS } from "@/client/features/keywords/locations";
 import { devicesLabel, scheduleLabel } from "@/shared/rank-tracking";
+import { formatLocationLabel } from "@/shared/keyword-locations";
 import type {
   ComparePeriod,
   RankTrackingConfig,
@@ -30,7 +31,7 @@ export function RankTrackingDetailHeader({
   onToggleAddKeywords,
 }: {
   config: RankTrackingConfig;
-  run: { lastCheckedAt: string } | null | undefined;
+  run: { lastCheckedAt: string | null } | null | undefined;
   costEstimate: { keywordCount: number; costUsd: number } | undefined;
   hasBothDevices: boolean;
   activeDevice: "desktop" | "mobile";
@@ -45,10 +46,12 @@ export function RankTrackingDetailHeader({
       <div>
         <h2 className="text-lg font-semibold">{config.domain}</h2>
         <p className="text-xs text-base-content/60">
-          {LOCATIONS[config.locationCode] ?? "US"} &middot;{" "}
-          {devicesLabel(config.devices)} &middot;{" "}
+          {config.locationName
+            ? formatLocationLabel(config.locationName, 2)
+            : (LOCATIONS[config.locationCode] ?? "US")}{" "}
+          &middot; {devicesLabel(config.devices)} &middot;{" "}
           {scheduleLabel(config.scheduleInterval)}
-          {run && (
+          {run?.lastCheckedAt && (
             <>
               {" "}
               &middot; Last: {new Date(run.lastCheckedAt).toLocaleDateString()}
@@ -93,7 +96,7 @@ export function RankTrackingDetailHeader({
           <option value="90d">vs 90 days ago</option>
         </select>
         <div className="hidden sm:block h-6 w-px bg-base-300" />
-        <button className="btn btn-outline btn-sm gap-1" onClick={onEdit}>
+        <button className="btn btn-sm gap-1" onClick={onEdit}>
           <Settings className="size-3.5" />
           Configure
         </button>

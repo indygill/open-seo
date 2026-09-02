@@ -1,18 +1,11 @@
 import { z } from "zod";
 import {
-  BacklinksBacklinksLiveRequestInfo,
-  BacklinksDomainPagesSummaryLiveRequestInfo,
-  BacklinksHistoryLiveRequestInfo,
-  BacklinksReferringDomainsLiveRequestInfo,
-  BacklinksSummaryLiveRequestInfo,
-} from "dataforseo-client";
-import {
   normalizeBacklinksSpamFilterOptions,
   type BacklinksSpamFilterOptions,
 } from "@/types/schemas/backlinks";
-import { createDataforseoAccessClassifier } from "@/server/lib/dataforseoAccessClassification";
+import { createDataforseoBillingClassifier } from "@/server/lib/dataforseoBillingClassification";
 import { AppError } from "@/server/lib/errors";
-import { backlinksApi } from "@/server/lib/dataforseo/core";
+import { dataforseoPost } from "@/server/lib/dataforseo/core";
 import {
   assertOk,
   buildTaskBilling,
@@ -21,9 +14,15 @@ import {
   type DataforseoApiResponse,
 } from "@/server/lib/dataforseo/envelope";
 
-export { normalizeBacklinksTarget } from "@/server/lib/dataforseoBacklinksTarget";
-
-type BacklinksRequest = { target: string };
+type BacklinksRequest = {
+  target: string;
+  /**
+   * Whether the target's subdomains count. Defaults to DataForSEO's `true`.
+   * The API ignores it for page targets; `backlinks/history/live` has no such
+   * field, so a domain-scoped history is always subdomain-inclusive.
+   */
+  includeSubdomains?: boolean;
+};
 type BacklinksListRequest = BacklinksRequest &
   BacklinksSpamFilterOptions & {
     limit?: number;
@@ -41,11 +40,8 @@ type BacklinksTimeseriesRequest = {
   dateTo: string;
 };
 
-const classifyBacklinksError = createDataforseoAccessClassifier({
+const classifyBacklinksError = createDataforseoBillingClassifier({
   pathPrefix: "/backlinks/",
-  notEnabledCode: "BACKLINKS_NOT_ENABLED",
-  notEnabledMessage:
-    "Backlinks is not enabled for the connected DataForSEO account",
   billingIssueCode: "BACKLINKS_BILLING_ISSUE",
   billingIssueMessage:
     "The connected DataForSEO account has a billing or balance issue",
@@ -145,7 +141,7 @@ export const backlinksHistoryItemSchema = z
 function buildCommonPayload(input: BacklinksRequest) {
   return {
     target: input.target,
-    include_subdomains: true,
+    include_subdomains: input.includeSubdomains ?? true,
     include_indirect_links: true,
     exclude_internal_backlinks: true,
     backlinks_status_type: "live",
@@ -175,9 +171,11 @@ function combineFilters(
 }
 
 export async function fetchBacklinksSummary(input: BacklinksRequest) {
-  const response = await backlinksApi(classifyBacklinksError).summaryLive([
-    new BacklinksSummaryLiveRequestInfo(buildCommonPayload(input)),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/backlinks/summary/live",
+    [buildCommonPayload(input)],
+    { classify: classifyBacklinksError },
+  );
   const task = assertOk(response, assertOptions("/v3/backlinks/summary/live"));
 
   const firstResult = task.result?.[0];
@@ -213,16 +211,20 @@ export async function fetchBacklinksRows(input: BacklinksListRequest) {
       ? ["backlink_spam_score", "<=", spamFilterOptions.spamThreshold]
       : undefined,
   );
-  const response = await backlinksApi(classifyBacklinksError).backlinksLive([
-    new BacklinksBacklinksLiveRequestInfo({
-      ...buildCommonPayload(input),
-      limit: input.limit ?? 100,
-      offset: input.offset,
-      order_by: input.orderBy ?? ["rank,desc"],
-      mode: input.mode,
-      ...(filters ? { filters } : {}),
-    }),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/backlinks/backlinks/live",
+    [
+      {
+        ...buildCommonPayload(input),
+        limit: input.limit ?? 100,
+        offset: input.offset,
+        order_by: input.orderBy ?? ["rank,desc"],
+        mode: input.mode,
+        ...(filters ? { filters } : {}),
+      },
+    ],
+    { classify: classifyBacklinksError },
+  );
   const task = assertOk(
     response,
     assertOptions("/v3/backlinks/backlinks/live"),
@@ -244,17 +246,19 @@ export async function fetchReferringDomains(input: BacklinksListRequest) {
       ? ["backlinks_spam_score", "<=", spamFilterOptions.spamThreshold]
       : undefined,
   );
-  const response = await backlinksApi(
-    classifyBacklinksError,
-  ).referringDomainsLive([
-    new BacklinksReferringDomainsLiveRequestInfo({
-      ...buildCommonPayload(input),
-      limit: input.limit ?? 100,
-      offset: input.offset,
-      order_by: input.orderBy ?? ["backlinks,desc"],
-      ...(filters ? { filters } : {}),
-    }),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/backlinks/referring_domains/live",
+    [
+      {
+        ...buildCommonPayload(input),
+        limit: input.limit ?? 100,
+        offset: input.offset,
+        order_by: input.orderBy ?? ["backlinks,desc"],
+        ...(filters ? { filters } : {}),
+      },
+    ],
+    { classify: classifyBacklinksError },
+  );
   const task = assertOk(
     response,
     assertOptions("/v3/backlinks/referring_domains/live"),
@@ -275,17 +279,19 @@ export async function fetchReferringDomains(input: BacklinksListRequest) {
 export async function fetchDomainPagesSummary(input: BacklinksListRequest) {
   const filters =
     input.filters && input.filters.length > 0 ? input.filters : undefined;
-  const response = await backlinksApi(
-    classifyBacklinksError,
-  ).domainPagesSummaryLive([
-    new BacklinksDomainPagesSummaryLiveRequestInfo({
-      ...buildCommonPayload(input),
-      limit: input.limit ?? 100,
-      offset: input.offset,
-      order_by: input.orderBy ?? ["backlinks,desc"],
-      ...(filters ? { filters } : {}),
-    }),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/backlinks/domain_pages_summary/live",
+    [
+      {
+        ...buildCommonPayload(input),
+        limit: input.limit ?? 100,
+        offset: input.offset,
+        order_by: input.orderBy ?? ["backlinks,desc"],
+        ...(filters ? { filters } : {}),
+      },
+    ],
+    { classify: classifyBacklinksError },
+  );
   const task = assertOk(
     response,
     assertOptions("/v3/backlinks/domain_pages_summary/live"),
@@ -304,14 +310,18 @@ export async function fetchDomainPagesSummary(input: BacklinksListRequest) {
 }
 
 export async function fetchBacklinksHistory(input: BacklinksTimeseriesRequest) {
-  const response = await backlinksApi(classifyBacklinksError).historyLive([
-    new BacklinksHistoryLiveRequestInfo({
-      target: input.target,
-      date_from: input.dateFrom,
-      date_to: input.dateTo,
-      rank_scale: "one_hundred",
-    }),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/backlinks/history/live",
+    [
+      {
+        target: input.target,
+        date_from: input.dateFrom,
+        date_to: input.dateTo,
+        rank_scale: "one_hundred",
+      },
+    ],
+    { classify: classifyBacklinksError },
+  );
   const task = assertOk(response, assertOptions("/v3/backlinks/history/live"));
   return {
     data: parseTaskItems(

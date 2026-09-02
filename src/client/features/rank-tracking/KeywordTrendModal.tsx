@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Copy, Download, Loader2 } from "lucide-react";
+import { reverse, sortBy } from "remeda";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "@/client/components/Modal";
@@ -8,6 +9,7 @@ import { captureClientEvent } from "@/client/lib/posthog";
 import { getRankKeywordHistory } from "@/serverFunctions/rank-tracking";
 import type { RankKeywordHistoryPoint } from "@/serverFunctions/rank-tracking";
 import { LOCATIONS } from "@/client/features/keywords/locations";
+import { formatLocationLabel } from "@/shared/keyword-locations";
 import { csvChange, DeviceRankCell } from "./RankTrackingTableParts";
 import {
   RankTrendChart,
@@ -34,6 +36,7 @@ export function KeywordTrendModal({
   configId,
   domain,
   locationCode,
+  locationName,
   serpDepth,
   onClose,
 }: {
@@ -42,6 +45,7 @@ export function KeywordTrendModal({
   configId: string;
   domain: string;
   locationCode: number;
+  locationName?: string;
   serpDepth: number;
   onClose: () => void;
 }) {
@@ -145,8 +149,11 @@ export function KeywordTrendModal({
             {target.keyword}
           </h3>
           <p className="text-xs text-base-content/60">
-            {domain} &middot; {LOCATIONS[locationCode] ?? "US"} &middot;
-            Position over time
+            {domain} &middot;{" "}
+            {locationName
+              ? formatLocationLabel(locationName, 2)
+              : (LOCATIONS[locationCode] ?? "US")}{" "}
+            &middot; Position over time
           </p>
         </div>
         <TrendRangeToggle value={sinceDays} onChange={setSinceDays} />
@@ -357,7 +364,7 @@ function buildChartData(
     row[p.device] = p.position === null ? serpDepth : p.position;
     byTime.set(ts, row);
   }
-  return [...byTime.values()].toSorted((a, b) => a.checkedAt - b.checkedAt);
+  return sortBy([...byTime.values()], (row) => row.checkedAt);
 }
 
 interface HistoryRow {
@@ -387,7 +394,7 @@ function buildHistoryRows(points: RankKeywordHistoryPoint[]): HistoryRow[] {
     });
     prevByDevice.set(p.device, p.position);
   }
-  return rows.toReversed();
+  return reverse(rows);
 }
 
 function slugify(value: string): string {

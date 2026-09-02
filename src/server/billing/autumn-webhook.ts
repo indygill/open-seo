@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { getRequiredEnvValue } from "@/server/lib/runtime-env";
+import { captureServerError } from "@/server/lib/posthog";
+import { trackDubSalesForOrganization } from "@/server/referrals/dub";
 import { syncAutumnCustomerStatus } from "./customer-status-sync";
 import { verifySvixSignature } from "./svix";
 
@@ -53,9 +55,29 @@ export async function handleAutumnWebhookRequest(request: Request) {
     try {
       await syncAutumnCustomerStatus(customerId);
     } catch (error) {
-      console.error("Autumn billing.updated sync failed", error);
+      // Drizzle truncates its own message to "Failed query:"; the real driver
+      // detail (postgres.js code/constraint) lives on error.cause, so log that
+      // explicitly. Also forward to PostHog — this raw handler runs outside the
+      // server-function middleware, so nothing else captures it as a $exception.
+      console.error("Autumn billing.updated sync failed", customerId, error, {
+        cause: error instanceof Error ? error.cause : undefined,
+      });
+      // Webhooks carry no user; the Autumn customer id is the organization id,
+      // which at least makes "users affected" count organizations instead of events.
+      await captureServerError(
+        error,
+        {
+          source: "autumn_webhook",
+          customer_id: customerId,
+        },
+        customerId,
+      );
       return json({ error: "Webhook processing failed" }, 500);
     }
+
+    // Referral revenue attribution; internally fire-and-forget and can never
+    // fail the webhook response.
+    await trackDubSalesForOrganization(customerId);
   }
 
   return json({ received: true });

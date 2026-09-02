@@ -25,30 +25,20 @@ import {
   useKeywordSaveMutation,
   useKeywordSearchParams,
   useKeywordUiState,
-  useResolvedKeywordLocation,
 } from "./keywordControllerInternals";
 import { useKeywordOverviewState } from "./useKeywordOverviewState";
-
-type OpenKeywordTabInput = {
-  keyword: string;
-  locationCode: number;
-  resultLimit: ResultLimit;
-  mode: KeywordMode;
-  clickstream: boolean;
-};
 
 export type KeywordResearchControllerInput = {
   projectId: string;
   keywordInput: string;
-  locationCode: number;
-  hasExplicitLocationCode: boolean;
+  locationCode: number | undefined;
+  displayedLocationCode: number;
+  setPreferredLocationCode: (locationCode: number) => void;
   resultLimit: ResultLimit;
   keywordMode: KeywordMode;
   clickstream: boolean;
   sortField: SortField;
   sortDir: SortDir;
-  getOpenKeywordTabs?: () => readonly OpenKeywordTabInput[];
-  keywordTabsLimit?: number;
   /**
    * Called when the user submits the search form. Lets the caller decide
    * whether the submission opens tabs or just rewrites the URL — the
@@ -60,8 +50,8 @@ export type KeywordResearchControllerInput = {
 export function useKeywordResearchController(
   input: KeywordResearchControllerInput,
 ) {
-  const { locationCode, setPreferredLocationCode } =
-    useResolvedKeywordLocation(input);
+  const { displayedLocationCode, locationCode, setPreferredLocationCode } =
+    input;
   const {
     filtersForm,
     values: filterValues,
@@ -86,6 +76,10 @@ export function useKeywordResearchController(
     serpResults,
     activeSerpKeyword,
     serpLoading,
+    serpLoadingMore,
+    canLoadMoreSerp,
+    deepFetchFailed,
+    retrySerp,
     serpError,
   } = useKeywordSerpAnalysis(input.projectId, locationCode);
 
@@ -115,6 +109,7 @@ export function useKeywordResearchController(
       projectId: input.projectId,
       keywordInput: input.keywordInput,
       locationCode,
+      displayedLocationCode,
       resultLimit: input.resultLimit,
       mode: input.keywordMode,
       clickstream: input.clickstream,
@@ -148,9 +143,7 @@ export function useKeywordResearchController(
   const controlsForm = useKeywordControlsForm(
     {
       ...input,
-      locationCode,
-      getOpenKeywordTabs: input.getOpenKeywordTabs,
-      keywordTabsLimit: input.keywordTabsLimit,
+      locationCode: displayedLocationCode,
     },
     (value) => {
       setPreferredLocationCode(value.locationCode);
@@ -271,11 +264,15 @@ export function useKeywordResearchController(
     researchMutationError,
     retrySearch,
     resetFilters,
+    retrySerp,
     rows,
     searchedKeyword,
     selectedRows,
+    canLoadMoreSerp,
+    deepFetchFailed,
     serpError,
     serpLoading,
+    serpLoadingMore,
     serpPage,
     serpQuery,
     serpResults,

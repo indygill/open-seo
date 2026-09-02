@@ -5,6 +5,11 @@ import { toast } from "sonner";
 import { Modal } from "@/client/components/Modal";
 import { getStandardErrorMessage } from "@/client/lib/error-messages";
 import { setLastProjectId } from "@/client/lib/active-project";
+import {
+  DEFAULT_LOCATION_CODE,
+  getLanguageCode,
+} from "@/client/features/keywords/locations";
+import { ProjectMarketFields } from "@/client/features/projects/ProjectMarketFields";
 import { createProject } from "@/serverFunctions/projects";
 
 export function CreateProjectModal({ onClose }: { onClose: () => void }) {
@@ -12,21 +17,29 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const [name, setName] = React.useState("");
   const [domain, setDomain] = React.useState("");
+  const [market, setMarket] = React.useState({
+    locationCode: DEFAULT_LOCATION_CODE,
+    languageCode: getLanguageCode(DEFAULT_LOCATION_CODE),
+  });
 
   const createMutation = useMutation({
     mutationFn: () =>
       createProject({
-        data: { name: name.trim(), domain: domain.trim() || undefined },
+        data: {
+          name: name.trim(),
+          domain: domain.trim() || undefined,
+          ...market,
+        },
       }),
     onSuccess: async (created) => {
       setLastProjectId(created.id);
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
       onClose();
       toast.success("Project created");
-      // Land on the new project's settings so they can connect Search Console
-      // and finish setting up the workspace.
+      // Land on the new project's integrations so they can connect Search
+      // Console and finish setting up the workspace.
       void navigate({
-        to: "/p/$projectId/settings",
+        to: "/p/$projectId/settings/integrations",
         params: { projectId: created.id },
       });
     },
@@ -87,6 +100,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             creating the project.
           </span>
         </label>
+
+        <div className="flex flex-col gap-1.5">
+          <ProjectMarketFields value={market} onChange={setMarket} />
+          <span className="text-xs text-base-content/50">
+            Keyword, SERP, and domain data uses this country and language unless
+            a call asks for a different one. Change it later in project
+            settings.
+          </span>
+        </div>
 
         <div className="flex justify-end gap-2">
           <button

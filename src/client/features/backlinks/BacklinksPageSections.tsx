@@ -23,6 +23,11 @@ import {
   BACKLINKS_PAGE_SIZES,
   type BacklinksTab,
 } from "@/types/schemas/backlinks";
+import { MAX_DATAFORSEO_FILTER_CONDITIONS } from "@/types/schemas/domain";
+import {
+  BACKLINKS_SUBFOLDER_FILTER_CONDITIONS,
+  type ResearchScope,
+} from "@/shared/researchScope";
 
 const BACKLINKS_RESULTS_TABS: Array<{
   tab: BacklinksSearchState["tab"];
@@ -36,6 +41,7 @@ const BACKLINKS_RESULTS_TABS: Array<{
 export function BacklinksResultsCard({
   projectId,
   activeTab,
+  scope,
   tabRows,
   filters,
   sorting,
@@ -53,6 +59,7 @@ export function BacklinksResultsCard({
 }: {
   projectId: string;
   activeTab: BacklinksSearchState["tab"];
+  scope: ResearchScope;
   tabRows: BacklinksTabRows;
   filters: BacklinksFiltersState;
   sorting: SortingState;
@@ -106,8 +113,11 @@ export function BacklinksResultsCard({
     <div className="border border-base-300 rounded-xl bg-base-100 overflow-hidden">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 py-3 border-b border-base-300">
         <div className="space-y-2">
-          <div role="tablist" className="tabs tabs-box w-fit">
-            {BACKLINKS_RESULTS_TABS.map(({ label, tab }) => (
+          <div role="tablist" className="tabs tabs-border w-fit">
+            {BACKLINKS_RESULTS_TABS.filter(
+              // Referring domains can't be filtered to a path prefix.
+              ({ tab }) => !(scope === "subfolder" && tab === "domains"),
+            ).map(({ label, tab }) => (
               <TabLink
                 key={tab}
                 activeTab={activeTab}
@@ -157,7 +167,7 @@ export function BacklinksResultsCard({
           <div
             role="tablist"
             aria-label="Backlinks view"
-            className="ml-auto tabs tabs-box tabs-xs w-fit"
+            className="ml-auto tabs tabs-border tabs-xs w-fit"
           >
             <button
               type="button"
@@ -188,6 +198,15 @@ export function BacklinksResultsCard({
           activeTab={activeTab}
           filters={filters}
           onApplied={() => onPageChange(1)}
+          // The subfolder url-prefix group (and, on the backlinks tab, the
+          // server-appended spam condition) shares the 8-condition budget.
+          maxConditions={
+            scope === "subfolder"
+              ? MAX_DATAFORSEO_FILTER_CONDITIONS -
+                BACKLINKS_SUBFOLDER_FILTER_CONDITIONS -
+                (activeTab === "pages" ? 0 : 1)
+              : undefined
+          }
         />
       ) : null}
 

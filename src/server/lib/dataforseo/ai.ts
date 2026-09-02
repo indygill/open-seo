@@ -1,19 +1,5 @@
 import { z } from "zod";
 import {
-  AiOptimizationChatGptLlmResponsesLiveRequestInfo,
-  AiOptimizationClaudeLlmResponsesLiveRequestInfo,
-  AiOptimizationGeminiLlmResponsesLiveRequestInfo,
-  AiOptimizationLLmMentionsCrossAggregateMetricsTargetInfo,
-  AiOptimizationLLmMentionsDomainElement,
-  AiOptimizationLLmMentionsKeywordElement,
-  AiOptimizationLlmMentionsAggregatedMetricsLiveRequestInfo,
-  AiOptimizationLlmMentionsCrossAggregatedMetricsLiveRequestInfo,
-  AiOptimizationLlmMentionsSearchLiveRequestInfo,
-  AiOptimizationLlmMentionsTopPagesLiveRequestInfo,
-  type BaseAiOptimizationLLmMentionsTargetElement,
-  type AiOptimizationPerplexityLlmResponsesLiveRequestInfo,
-} from "dataforseo-client";
-import {
   llmAggregatedTotalSchema,
   llmCrossAggregatedItemSchema,
   llmMentionItemSchema,
@@ -25,9 +11,10 @@ import {
   type LlmResponseResult,
   type LlmTopPagesItem,
 } from "@/server/lib/dataforseoLlmSchemas";
-import { createDataforseoAccessClassifier } from "@/server/lib/dataforseoAccessClassification";
+import { createDataforseoBillingClassifier } from "@/server/lib/dataforseoBillingClassification";
 import { AppError } from "@/server/lib/errors";
-import { aiOptimizationApi } from "@/server/lib/dataforseo/core";
+import { dataforseoPost } from "@/server/lib/dataforseo/core";
+import type { LlmPlatform, LlmTarget } from "@/server/lib/dataforseo/shared";
 import {
   assertOk,
   buildTaskBilling,
@@ -36,17 +23,8 @@ import {
   type DataforseoTaskLike,
 } from "@/server/lib/dataforseo/envelope";
 
-// ChatGPT mention/response data is only available for US/en per DataForSEO docs.
-export const CHATGPT_LOCATION_CODE = 2840;
-export const CHATGPT_LANGUAGE_CODE = "en";
-
-export type LlmPlatform = "chat_gpt" | "google";
-
-const classifyAiSearchError = createDataforseoAccessClassifier({
+const classifyAiSearchError = createDataforseoBillingClassifier({
   pathPrefix: "/ai_optimization/",
-  notEnabledCode: "AI_SEARCH_NOT_ENABLED",
-  notEnabledMessage:
-    "AI Optimization is not enabled for the connected DataForSEO account",
   billingIssueCode: "AI_SEARCH_BILLING_ISSUE",
   billingIssueMessage:
     "The connected DataForSEO account has a billing or balance issue",
@@ -55,57 +33,12 @@ const classifyAiSearchError = createDataforseoAccessClassifier({
 const assertOptions = (path: string) =>
   ({ classify: classifyAiSearchError, classifyPath: path }) as const;
 
-// ---------------------------------------------------------------------------
-// Target builders — DataForSEO's `target` array accepts domain OR keyword
-// entries. We always pass exactly one target per call.
-// ---------------------------------------------------------------------------
-
-type LlmTarget =
-  | {
-      domain: string;
-      include_subdomains?: boolean;
-      search_filter?: "include" | "exclude";
-      search_scope?: string[];
-    }
-  | {
-      keyword: string;
-      search_filter?: "include" | "exclude";
-      search_scope?: string[];
-      match_type?: "word_match" | "partial_match";
-    };
-
-export function buildLlmTarget(input: {
-  type: "domain" | "keyword";
-  value: string;
-}): LlmTarget {
-  if (input.type === "domain") {
-    return {
-      domain: input.value,
-      include_subdomains: true,
-      search_filter: "include",
-      search_scope: ["any"],
-    };
-  }
-  return {
-    keyword: input.value,
-    search_filter: "include",
-    search_scope: ["any", "brand_entities"],
-    match_type: "word_match",
-  };
-}
-
 function clampLimit(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
-function targetList(
-  target: LlmTarget,
-): BaseAiOptimizationLLmMentionsTargetElement[] {
-  return [
-    "domain" in target
-      ? new AiOptimizationLLmMentionsDomainElement(target)
-      : new AiOptimizationLLmMentionsKeywordElement(target),
-  ];
+function targetList(target: LlmTarget): LlmTarget[] {
+  return [target];
 }
 
 function firstResult(task: DataforseoTaskLike): Record<string, unknown> | null {
@@ -128,17 +61,19 @@ type LlmMentionsSearchInput = {
 export async function fetchLlmMentionsSearch(
   input: LlmMentionsSearchInput,
 ): Promise<DataforseoApiResponse<LlmMentionItem[]>> {
-  const response = await aiOptimizationApi(
-    classifyAiSearchError,
-  ).llmMentionsSearchLive([
-    new AiOptimizationLlmMentionsSearchLiveRequestInfo({
-      target: targetList(input.target),
-      platform: input.platform,
-      location_code: input.locationCode,
-      language_code: input.languageCode,
-      limit: clampLimit(input.limit ?? 100, 1, 1000),
-    }),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/ai_optimization/llm_mentions/search/live",
+    [
+      {
+        target: targetList(input.target),
+        platform: input.platform,
+        location_code: input.locationCode,
+        language_code: input.languageCode,
+        limit: clampLimit(input.limit ?? 100, 1, 1000),
+      },
+    ],
+    { classify: classifyAiSearchError },
+  );
   const task = assertOk(
     response,
     assertOptions("/v3/ai_optimization/llm_mentions/search/live"),
@@ -171,17 +106,19 @@ type LlmAggregatedMetricsInput = {
 export async function fetchLlmAggregatedMetrics(
   input: LlmAggregatedMetricsInput,
 ): Promise<DataforseoApiResponse<LlmAggregatedTotal>> {
-  const response = await aiOptimizationApi(
-    classifyAiSearchError,
-  ).llmMentionsAggregatedMetricsLive([
-    new AiOptimizationLlmMentionsAggregatedMetricsLiveRequestInfo({
-      target: targetList(input.target),
-      platform: input.platform,
-      location_code: input.locationCode,
-      language_code: input.languageCode,
-      internal_list_limit: clampLimit(input.internalListLimit ?? 10, 1, 20),
-    }),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/ai_optimization/llm_mentions/aggregated_metrics/live",
+    [
+      {
+        target: targetList(input.target),
+        platform: input.platform,
+        location_code: input.locationCode,
+        language_code: input.languageCode,
+        internal_list_limit: clampLimit(input.internalListLimit ?? 10, 1, 20),
+      },
+    ],
+    { classify: classifyAiSearchError },
+  );
   const task = assertOk(
     response,
     assertOptions("/v3/ai_optimization/llm_mentions/aggregated_metrics/live"),
@@ -214,19 +151,21 @@ type LlmTopPagesInput = {
 export async function fetchLlmTopPages(
   input: LlmTopPagesInput,
 ): Promise<DataforseoApiResponse<LlmTopPagesItem[]>> {
-  const response = await aiOptimizationApi(
-    classifyAiSearchError,
-  ).llmMentionsTopPagesLive([
-    new AiOptimizationLlmMentionsTopPagesLiveRequestInfo({
-      target: targetList(input.target),
-      platform: input.platform,
-      location_code: input.locationCode,
-      language_code: input.languageCode,
-      links_scope: "sources",
-      items_list_limit: clampLimit(input.itemsListLimit ?? 10, 1, 10),
-      internal_list_limit: 5,
-    }),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/ai_optimization/llm_mentions/top_pages/live",
+    [
+      {
+        target: targetList(input.target),
+        platform: input.platform,
+        location_code: input.locationCode,
+        language_code: input.languageCode,
+        links_scope: "sources",
+        items_list_limit: clampLimit(input.itemsListLimit ?? 10, 1, 10),
+        internal_list_limit: 5,
+      },
+    ],
+    { classify: classifyAiSearchError },
+  );
   const task = assertOk(
     response,
     assertOptions("/v3/ai_optimization/llm_mentions/top_pages/live"),
@@ -268,23 +207,22 @@ export async function fetchLlmCrossAggregatedMetrics(
     );
   }
 
-  const response = await aiOptimizationApi(
-    classifyAiSearchError,
-  ).llmMentionsCrossAggregatedMetricsLive([
-    new AiOptimizationLlmMentionsCrossAggregatedMetricsLiveRequestInfo({
-      targets: input.groups.map(
-        (group) =>
-          new AiOptimizationLLmMentionsCrossAggregateMetricsTargetInfo({
-            aggregation_key: group.key,
-            target: targetList(group.target),
-          }),
-      ),
-      platform: input.platform,
-      location_code: input.locationCode,
-      language_code: input.languageCode,
-      internal_list_limit: clampLimit(input.internalListLimit ?? 5, 1, 10),
-    }),
-  ]);
+  const response = await dataforseoPost(
+    "/v3/ai_optimization/llm_mentions/cross_aggregated_metrics/live",
+    [
+      {
+        targets: input.groups.map((group) => ({
+          aggregation_key: group.key,
+          target: targetList(group.target),
+        })),
+        platform: input.platform,
+        location_code: input.locationCode,
+        language_code: input.languageCode,
+        internal_list_limit: clampLimit(input.internalListLimit ?? 5, 1, 10),
+      },
+    ],
+    { classify: classifyAiSearchError },
+  );
   const task = assertOk(
     response,
     assertOptions(
@@ -310,6 +248,24 @@ export async function fetchLlmCrossAggregatedMetrics(
 
 type LlmResponseModelSlug = "chat_gpt" | "claude" | "gemini" | "perplexity";
 
+/**
+ * Accepted `model_name` values per slug, mirroring DataForSEO's
+ * `/ai_optimization/{model}/llm_responses/models` catalog (verified 2026-06-30).
+ * We validate against this before dispatching because DataForSEO BILLS a task
+ * that fails with `Invalid Field: 'model_name'` — a stale or mistyped model name
+ * would otherwise pay for a guaranteed-rejected call. DataForSEO resolves a
+ * basic alias (e.g. `claude-sonnet-4-5`) to its latest dated version.
+ */
+const ACCEPTED_LLM_MODEL_NAMES: Record<
+  LlmResponseModelSlug,
+  ReadonlySet<string>
+> = {
+  chat_gpt: new Set(["gpt-5"]),
+  claude: new Set(["claude-sonnet-4-5", "claude-sonnet-4-6"]),
+  gemini: new Set(["gemini-2.5-pro"]),
+  perplexity: new Set(["sonar-reasoning-pro", "sonar-pro", "sonar"]),
+};
+
 type LlmResponsesInput = {
   userPrompt: string;
   modelSlug: LlmResponseModelSlug;
@@ -328,26 +284,18 @@ type LlmResponseRequestFields = {
   web_search_country_iso_code?: string;
 };
 
-function buildPerplexityLlmResponseRequest(
-  fields: LlmResponseRequestFields,
-): AiOptimizationPerplexityLlmResponsesLiveRequestInfo {
-  return {
-    ...fields,
-    init(data?: unknown) {
-      if (isRecord(data)) Object.assign(this, data);
-    },
-    toJSON(data?: unknown) {
-      return {
-        ...(isRecord(data) ? data : {}),
-        ...fields,
-      };
-    },
-  };
-}
-
 export async function fetchLlmResponse(
   input: LlmResponsesInput,
 ): Promise<DataforseoApiResponse<LlmResponseResult>> {
+  // Fail fast on an unknown model_name: DataForSEO charges for tasks that fail
+  // with `Invalid Field: 'model_name'`, so we must never dispatch one.
+  if (!ACCEPTED_LLM_MODEL_NAMES[input.modelSlug].has(input.modelName)) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `Unsupported DataForSEO model_name "${input.modelName}" for ${input.modelSlug}`,
+    );
+  }
+
   // DataForSEO's Gemini endpoint rejects `web_search_country_iso_code` with a
   // 40501 "Invalid Field" error. The other three models accept it.
   const supportsCountry = input.modelSlug !== "gemini";
@@ -361,25 +309,11 @@ export async function fetchLlmResponse(
       : {}),
   };
 
-  const api = aiOptimizationApi(classifyAiSearchError);
-  const response =
-    input.modelSlug === "chat_gpt"
-      ? await api.chatGptLlmResponsesLive([
-          new AiOptimizationChatGptLlmResponsesLiveRequestInfo(fields),
-        ])
-      : input.modelSlug === "claude"
-        ? await api.claudeLlmResponsesLive([
-            new AiOptimizationClaudeLlmResponsesLiveRequestInfo(fields),
-          ])
-        : input.modelSlug === "gemini"
-          ? await api.geminiLlmResponsesLive([
-              new AiOptimizationGeminiLlmResponsesLiveRequestInfo(fields),
-            ])
-          : await api.perplexityLlmResponsesLive([
-              // The generated Perplexity request class drops `web_search` in
-              // toJSON(), while the SDK method only JSON.stringify's this body.
-              buildPerplexityLlmResponseRequest(fields),
-            ]);
+  const response = await dataforseoPost(
+    `/v3/ai_optimization/${input.modelSlug}/llm_responses/live`,
+    [fields],
+    { classify: classifyAiSearchError },
+  );
 
   const task = assertOk(
     response,

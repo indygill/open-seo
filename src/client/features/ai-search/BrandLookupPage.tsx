@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
@@ -19,22 +19,31 @@ import { BrandLookupSearchCard } from "@/client/features/ai-search/components/Br
 import { BrandLookupHistorySection } from "@/client/features/ai-search/components/BrandLookupHistorySection";
 import { AiSearchLoadingState } from "@/client/features/ai-search/components/AiSearchLoadingState";
 import { AiSearchPaidPlanGate } from "@/client/features/ai-search/components/AiSearchPaidPlanGate";
-import { AiSearchSetupGate } from "@/client/features/ai-search/components/AiSearchSetupGate";
-import { AccessGateLoadingState } from "@/client/features/access-gate/AccessGate";
-import { useAiSearchAccess } from "@/client/features/ai-search/useAiSearchAccess";
 import { useBrandLookupSearchHistory } from "@/client/hooks/useBrandLookupSearchHistory";
 import {
   BRAND_LOOKUP_MAX_INPUT_LENGTH,
   parseCompetitorList,
 } from "@/types/schemas/ai-search";
 import { detectTarget } from "@/shared/targetDetection";
+import {
+  parseResearchTarget,
+  toScopeSearchParam,
+  type ResearchScope,
+} from "@/shared/researchScope";
 
 type Props = {
   projectId: string;
   initialQuery: string;
   initialCompetitors: string[];
-  onSearchChange: (nextQuery: string, nextCompetitors: string[]) => void;
+  initialScope: ResearchScope | undefined;
+  onSearchChange: (
+    nextQuery: string,
+    nextCompetitors: string[],
+    nextScope: ResearchScope | undefined,
+  ) => void;
 };
+
+const KEYWORD_SCOPE_REASON = "Scopes apply to domain lookups";
 
 const BRAND_LOOKUP_BULLETS = [
   {
@@ -66,10 +75,15 @@ function BrandLookupPageInner({
   projectId,
   initialQuery,
   initialCompetitors,
+  initialScope,
   onSearchChange,
   planGate,
 }: Props & { planGate: HostedPlanGateState }) {
   const [query, setQuery] = useState(initialQuery);
+  // The user's explicit scope pick, or undefined to follow the input's default.
+  const [scopeChoice, setScopeChoice] = useState<ResearchScope | undefined>(
+    initialScope,
+  );
   // Raw comma-separated competitor text; parsed into a deduped array on submit.
   const [competitorsInput, setCompetitorsInput] = useState(
     initialCompetitors.join(", "),
@@ -80,8 +94,6 @@ function BrandLookupPageInner({
     message: string;
   } | null>(null);
 
-  const access = useAiSearchAccess(projectId);
-
   const trimmedInitialQuery = initialQuery.trim();
   const hasActiveQuery = trimmedInitialQuery.length > 0;
   // The URL `c` param is the source of truth for the active lookup; the local
@@ -89,19 +101,44 @@ function BrandLookupPageInner({
   // stable string key, since `initialCompetitors` is a fresh array each render.
   const competitorKey = initialCompetitors.join(",");
 
+  // Scope only applies to domain/URL inputs. The pick always stays selectable
+  // — an invalid one (Subfolder without a path) errors on submit instead of
+  // the select greying out or changing under the user.
+  const scopeTarget = useMemo(() => {
+    if (detectTarget(query).type !== "domain") return null;
+    const parsed = parseResearchTarget(query);
+    return parsed.ok ? parsed.target : null;
+  }, [query]);
+
+  const selectedScope = scopeChoice ?? scopeTarget?.scope ?? "domain";
+  // Only grey the control once the input is clearly a brand keyword — an
+  // empty box shouldn't look disabled before the user has typed anything.
+  const scopeDisabledReason =
+    query.trim() !== "" && !scopeTarget ? KEYWORD_SCOPE_REASON : undefined;
+
   const lookupQuery = useQuery({
-    queryKey: ["brand-lookup", projectId, trimmedInitialQuery, competitorKey],
+    queryKey: [
+      "brand-lookup",
+      projectId,
+      trimmedInitialQuery,
+      competitorKey,
+      initialScope ?? "",
+    ],
     queryFn: () =>
       lookupBrand({
         data: {
           projectId,
           query: trimmedInitialQuery,
           competitors: initialCompetitors,
+          scope: initialScope,
           locationCode: 2840,
           languageCode: "en",
         },
       }),
-    enabled: hasActiveQuery && !planGate.isFreePlan && access.enabled,
+    // Client-side gate is a UX optimization only; the paywall is enforced
+    // server-side (lookupBrand → assertPaidPlan) before any DataForSEO spend,
+    // so a stale free-plan window here just yields a rejected request, not cost.
+    enabled: hasActiveQuery && !planGate.isFreePlan,
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
@@ -119,18 +156,20 @@ function BrandLookupPageInner({
   const lastAddedKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!hasActiveQuery || !lookupQuery.isSuccess) return;
-    const addedKey = `${trimmedInitialQuery}::${competitorKey}`;
+    const addedKey = `${trimmedInitialQuery}::${competitorKey}::${initialScope ?? ""}`;
     if (lastAddedKeyRef.current === addedKey) return;
     lastAddedKeyRef.current = addedKey;
     addSearch({
       query: trimmedInitialQuery,
       competitors: competitorKey ? competitorKey.split(",") : [],
+      scope: initialScope,
     });
   }, [
     hasActiveQuery,
     lookupQuery.isSuccess,
     trimmedInitialQuery,
     competitorKey,
+    initialScope,
     addSearch,
   ]);
 
@@ -178,8 +217,24 @@ function BrandLookupPageInner({
       });
       return;
     }
+    if (
+      scopeTarget &&
+      selectedScope === "subfolder" &&
+      scopeTarget.path === ""
+    ) {
+      setValidationError({
+        field: "query",
+        message: "Add a path to use Subfolder (e.g. example.com/blog)",
+      });
+      return;
+    }
     setValidationError(null);
-    onSearchChange(trimmed, competitors);
+    // Keyword lookups never carry a scope; domain lookups omit it when it
+    // matches the query's implied default.
+    const explicitScope = scopeTarget
+      ? toScopeSearchParam(trimmed, selectedScope)
+      : undefined;
+    onSearchChange(trimmed, competitors, explicitScope);
   };
 
   // The form inputs are reset whenever the URL `q`/`c` changes — including the
@@ -190,8 +245,9 @@ function BrandLookupPageInner({
   useEffect(() => {
     setQuery(initialQuery);
     setCompetitorsInput(competitorKey.split(",").join(", "));
+    setScopeChoice(initialScope);
     setValidationError(null);
-  }, [initialQuery, competitorKey]);
+  }, [initialQuery, competitorKey, initialScope]);
 
   const isLoading = hasActiveQuery && lookupQuery.isPending;
   const errorMessage =
@@ -199,8 +255,6 @@ function BrandLookupPageInner({
       ? getStandardErrorMessage(lookupQuery.error)
       : null;
   const resultData = hasActiveQuery ? lookupQuery.data : undefined;
-
-  if (planGate.isLoading) return null;
 
   return (
     <div className="px-4 py-4 pb-24 overflow-auto md:px-6 md:py-6 md:pb-8">
@@ -212,15 +266,7 @@ function BrandLookupPageInner({
           </p>
         </div>
 
-        {access.isLoading ? (
-          <AccessGateLoadingState />
-        ) : !access.enabled ? (
-          <AiSearchSetupGate
-            errorMessage={access.errorMessage ?? access.statusErrorMessage}
-            isRefetching={access.isRefetching}
-            onRetry={access.onRetry}
-          />
-        ) : planGate.isFreePlan ? (
+        {planGate.isFreePlan ? (
           <AiSearchPaidPlanGate
             feature="Brand Lookup"
             description="See how ChatGPT and Google AI Overview cite any brand or domain — total mentions, sample prompts where it appears, and the pages cited alongside it."
@@ -234,6 +280,9 @@ function BrandLookupPageInner({
                 setQuery(next);
                 if (validationError) setValidationError(null);
               }}
+              scope={selectedScope}
+              onScopeChange={setScopeChoice}
+              scopeDisabledReason={scopeDisabledReason}
               competitors={competitorsInput}
               onCompetitorsChange={(next) => {
                 setCompetitorsInput(next);
@@ -263,7 +312,7 @@ function BrandLookupPageInner({
                     from="/p/$projectId/brand-lookup"
                     to="/p/$projectId/brand-lookup"
                     params={{ projectId }}
-                    search={{ q: undefined, c: undefined }}
+                    search={{ q: undefined, c: undefined, scope: undefined }}
                     replace
                     className="btn btn-ghost btn-sm gap-2 px-0 text-base-content/70 hover:bg-transparent"
                   >

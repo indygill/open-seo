@@ -4,6 +4,7 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
+import { withPgClient } from "@/db";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { RankTrackingRepository } from "@/server/features/rank-tracking/repositories/RankTrackingRepository";
 import { failRunIfActive } from "@/server/features/rank-tracking/services/rankCheckRunGuards";
@@ -12,6 +13,7 @@ import {
   runQueuedCheck,
   type QueuedCheckStats,
 } from "@/server/workflows/rankCheckPaths";
+import { pgStep } from "@/server/workflows/pgStep";
 import { createDataforseoClient } from "@/server/lib/dataforseo";
 import { captureServerEvent } from "@/server/lib/posthog";
 import { AppError } from "@/server/lib/errors";
@@ -20,7 +22,10 @@ import {
   AUTUMN_SEO_DATA_BALANCE_FEATURE_ID,
   AUTUMN_SEO_DATA_TOPUP_BALANCE_FEATURE_ID,
 } from "@/shared/billing";
-import { estimateRankCheckCredits } from "@/shared/rank-tracking";
+import {
+  estimateRankCheckCredits,
+  rankCheckCostApprovalError,
+} from "@/shared/rank-tracking";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 
 const SINGLE_ATTEMPT_STEP_CONFIG = {
@@ -36,13 +41,15 @@ interface RankCheckParams {
   domain: string;
   locationCode: number;
   languageCode: string;
+  locationName?: string;
   devices: "both" | "desktop" | "mobile";
   serpDepth: number;
   trigger: "manual" | "scheduled";
   keywordIds?: string[];
+  maxCostCredits?: number;
 }
 
-async function prepareRankCheckKeywords(input: {
+export async function prepareRankCheckKeywords(input: {
   runId: string;
   configId: string;
   billingCustomer: BillingCustomerContext;
@@ -50,6 +57,7 @@ async function prepareRankCheckKeywords(input: {
   serpDepth: number;
   trigger: RankCheckParams["trigger"];
   keywordIds?: string[];
+  maxCostCredits?: number;
 }) {
   // If stale-cleanup marked our run failed before we got here, bail out
   // rather than resurrecting a superseded run.
@@ -77,16 +85,23 @@ async function prepareRankCheckKeywords(input: {
     throw new AppError("INTERNAL_ERROR", "No keywords to track");
   }
 
+  const { costCredits } = estimateRankCheckCredits(
+    trackingKeywords.length,
+    input.devices,
+    input.serpDepth,
+    input.trigger === "scheduled" ? "queued" : "live",
+  );
+  if (input.maxCostCredits != null && costCredits > input.maxCostCredits) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      rankCheckCostApprovalError(costCredits, input.maxCostCredits),
+    );
+  }
+
   // Verify the user has enough credits for the full check before starting.
   // Scheduled checks go through the cheaper task queue, so estimate at queued
   // pricing — a live-price estimate would skip checks the user can afford.
   if (await isHostedServerAuthMode()) {
-    const { costCredits } = estimateRankCheckCredits(
-      trackingKeywords.length,
-      input.devices,
-      input.serpDepth,
-      input.trigger === "scheduled" ? "queued" : "live",
-    );
     const [monthlyCheck, topupCheck] = await Promise.all([
       autumn.check({
         customerId: input.billingCustomer.organizationId,
@@ -249,6 +264,16 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
   RankCheckParams
 > {
   async run(event: WorkflowEvent<RankCheckParams>, step: WorkflowStep) {
+    // Scope a per-request Postgres client for this workflow invocation (no-op in
+    // D1 mode). The socket is reclaimed when the invocation ends, so there is
+    // nothing to tear down here.
+    return withPgClient(() => this.runScoped(event, step));
+  }
+
+  private async runScoped(
+    event: WorkflowEvent<RankCheckParams>,
+    step: WorkflowStep,
+  ) {
     const {
       runId,
       configId,
@@ -257,16 +282,17 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
       domain,
       locationCode,
       languageCode,
+      locationName,
       devices,
       serpDepth,
       trigger,
       keywordIds,
+      maxCostCredits,
     } = event.payload;
 
-    const client = createDataforseoClient(billingCustomer);
-
     // Guard: skip if config was archived after the workflow was triggered
-    const configCheck = await step.do(
+    const configCheck = await pgStep(
+      step,
       "check-active",
       { retries: { limit: 0, delay: "1 second" } },
       async () => {
@@ -287,7 +313,8 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
         `[rank-check] ${runId} starting (trigger=${trigger}, devices=${devices})`,
       );
 
-      const prepareResult = await step.do(
+      const prepareResult = await pgStep(
+        step,
         "prepare",
         { retries: { limit: 0, delay: "1 second" } },
         async () =>
@@ -299,10 +326,12 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
             serpDepth,
             trigger,
             keywordIds,
+            maxCostCredits,
           }),
       );
 
       const keywords = prepareResult.keywords;
+      const client = createDataforseoClient(billingCustomer);
 
       console.log(`[rank-check] ${runId} loaded ${keywords.length} keywords`);
 
@@ -318,6 +347,7 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
           domain,
           locationCode,
           languageCode,
+          locationName,
           runId,
         };
         // Scheduled checks use DataForSEO's task queue (~30% of live cost);
@@ -334,7 +364,7 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
         console.warn(`[rank-check] ${runId} partial failure: ${batchError}`);
       }
 
-      await step.do("finalize", SINGLE_ATTEMPT_STEP_CONFIG, async () =>
+      await pgStep(step, "finalize", SINGLE_ATTEMPT_STEP_CONFIG, async () =>
         finalizeRankCheckRun({
           runId,
           configId,
@@ -347,7 +377,7 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
       );
     } catch (error) {
       console.error(`Rank check ${runId} failed:`, error);
-      await step.do("mark-failed", SINGLE_ATTEMPT_STEP_CONFIG, async () =>
+      await pgStep(step, "mark-failed", SINGLE_ATTEMPT_STEP_CONFIG, async () =>
         markRankCheckRunFailed({
           runId,
           configId,

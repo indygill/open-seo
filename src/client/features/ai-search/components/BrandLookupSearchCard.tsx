@@ -2,11 +2,16 @@ import type { FormEvent } from "react";
 import { Search } from "lucide-react";
 import { isHostedClientAuthMode } from "@/lib/auth-mode";
 import { applyBillingMarkupUsd } from "@/shared/billing";
+import { ResearchScopeSelect } from "@/client/components/ResearchScopeSelect";
+import type { ResearchScope } from "@/shared/researchScope";
 import { BRAND_LOOKUP_MAX_INPUT_LENGTH } from "@/types/schemas/ai-search";
 
 type Props = {
   query: string;
   onQueryChange: (next: string) => void;
+  scope: ResearchScope;
+  onScopeChange: (next: ResearchScope) => void;
+  scopeDisabledReason: string | undefined;
   competitors: string;
   onCompetitorsChange: (next: string) => void;
   onSubmit: (event: FormEvent) => void;
@@ -42,6 +47,9 @@ const BRAND_LOOKUP_COMPETITOR_DISPLAYED_COST_USD = markup(
 export function BrandLookupSearchCard({
   query,
   onQueryChange,
+  scope,
+  onScopeChange,
+  scopeDisabledReason,
   competitors,
   onCompetitorsChange,
   onSubmit,
@@ -79,9 +87,15 @@ export function BrandLookupSearchCard({
               />
             </label>
 
+            <ResearchScopeSelect
+              value={scope}
+              onChange={onScopeChange}
+              disabledReason={scopeDisabledReason}
+            />
+
             <button
               type="submit"
-              className="btn btn-primary px-6"
+              className="btn btn-primary shrink-0 px-6"
               disabled={isLoading}
             >
               {isLoading ? "Looking up..." : "Look up"}

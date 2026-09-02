@@ -1,37 +1,27 @@
 import { AIChatAgent } from "@cloudflare/ai-chat";
 import {
   convertToModelMessages,
-  createUIMessageStream,
-  createUIMessageStreamResponse,
   stepCountIs,
   streamText,
   type StreamTextOnFinishCallback,
   type ToolSet,
 } from "ai";
 import type { OnChatMessageOptions } from "@cloudflare/ai-chat";
-import { z } from "zod";
 import { ProjectRepository } from "@/server/features/projects/repositories/ProjectRepository";
 import { buildOnboardingTools } from "@/server/features/onboarding/onboardingChatTools";
-import { getOnboardingModel } from "@/server/lib/openrouter";
+import { getChatAgentModel } from "@/server/lib/openrouter";
+import {
+  openRouterCostUsd,
+  staticAssistantResponse,
+} from "@/server/lib/chatAgent";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 import {
   customerHasManagedAccess,
-  getUsageCreditsRemaining,
+  checkUsageCreditsDepleted,
   trackUsageCreditSpend,
 } from "@/server/billing/subscription";
 import { FREE_ONBOARDING_QUESTION_LIMIT } from "@/shared/onboardingChat";
 import openSeoFactSheet from "@/server/features/onboarding/openseo-fact-sheet.md?raw";
-
-// OpenRouter (with usage accounting on) reports the real USD cost of each
-// response under providerMetadata.openrouter.usage.cost.
-const openRouterUsageSchema = z.object({
-  openrouter: z.object({ usage: z.object({ cost: z.number() }) }),
-});
-
-function openRouterCostUsd(providerMetadata: unknown): number {
-  const parsed = openRouterUsageSchema.safeParse(providerMetadata);
-  return parsed.success ? parsed.data.openrouter.usage.cost : 0;
-}
 
 function buildSystemPrompt(domain: string | null): string {
   return [
@@ -69,21 +59,6 @@ function buildSystemPrompt(domain: string | null): string {
   ].join("\n\n");
 }
 
-// A non-LLM assistant turn streamed back over the chat protocol. Used to surface
-// billing gates ("Subscribe to continue") without spending an LLM call — the
-// client renders it as a normal message from Sam.
-function staticAssistantResponse(text: string): Response {
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      const id = crypto.randomUUID();
-      writer.write({ type: "text-start", id });
-      writer.write({ type: "text-delta", id, delta: text });
-      writer.write({ type: "text-end", id });
-    },
-  });
-  return createUIMessageStreamResponse({ stream });
-}
-
 /**
  * Durable Object backing the onboarding strategy chat. The conversation is
  * persisted automatically in the DO's SQLite (`this.messages`), so it survives
@@ -95,6 +70,40 @@ function staticAssistantResponse(text: string): Response {
 export class OnboardingChatAgent extends AIChatAgent {
   // Cap stored history; the onboarding chat is short and pre-paywall.
   maxPersistedMessages = 60;
+
+  /** Permanently remove this project's transcript for an account erasure. */
+  async destroyForErasure(): Promise<void> {
+    for (const socket of this.ctx.getWebSockets()) {
+      socket.close(1000, "Account erased");
+    }
+    this.abortAllRequests("GDPR erasure");
+    this.resetTurnState();
+    await this.waitUntilStable({ timeout: 5_000 });
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+  }
+
+  // The base class persists each message as its own bounded SQLite row, so DO
+  // storage occasionally returns a transient internal error (code 10001) that
+  // clears on retry. Retry the message-write path a couple of times before
+  // surfacing the failure, rethrowing on non-transient errors or the last try.
+  async persistMessages(
+    ...args: Parameters<AIChatAgent["persistMessages"]>
+  ): Promise<void> {
+    const maxAttempts = 3;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await super.persistMessages(...args);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const transient =
+          message.includes("internal error") || message.includes("10001");
+        if (!transient || attempt >= maxAttempts) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+      }
+    }
+  }
 
   async onChatMessage(
     onFinish: StreamTextOnFinishCallback<ToolSet>,
@@ -142,9 +151,9 @@ export class OnboardingChatAgent extends AIChatAgent {
         );
       }
 
-      const { monthlyRemaining, topupRemaining } =
-        await getUsageCreditsRemaining(organizationId);
-      if (monthlyRemaining + topupRemaining <= 0) {
+      const { depleted, monthlyRemaining } =
+        await checkUsageCreditsDepleted(billingCustomer);
+      if (depleted) {
         return staticAssistantResponse(
           "You've used your onboarding credits. Subscribe to continue.",
         );
@@ -153,7 +162,7 @@ export class OnboardingChatAgent extends AIChatAgent {
       monthlyCreditsRemaining = monthlyRemaining;
     }
 
-    const model = await getOnboardingModel();
+    const model = await getChatAgentModel();
 
     const result = streamText({
       model,
@@ -162,11 +171,12 @@ export class OnboardingChatAgent extends AIChatAgent {
       // Cancel the (billable) LLM call if the user aborts/navigates away.
       abortSignal: options?.abortSignal,
       // Budget shared by reasoning + visible output. Reasoning tokens (enabled
-      // on the model) eat into this, so it's well above what the ~350-word
-      // strategy needs — otherwise the answer truncates mid-table once the
-      // model has spent the budget thinking. It's a ceiling, not a target: the
-      // model only generates (and we only bill) what it actually uses.
-      maxOutputTokens: 4000,
+      // on the model) eat into this, and at max effort they dwarf the ~350-word
+      // strategy — the old 4000 cap left almost no answer headroom and
+      // truncated mid-table once the model had spent the budget thinking.
+      // Deliberately roomy: it's a per-step ceiling, not a target — the model
+      // only generates (and we only bill) what it actually uses.
+      maxOutputTokens: 32_000,
       stopWhen: stepCountIs(5),
       // Meter LLM spend against the same credit pool as DataForSEO: sum the real
       // per-step cost OpenRouter reports and deduct it. Best-effort, hosted-only.

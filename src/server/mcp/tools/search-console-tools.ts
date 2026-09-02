@@ -4,14 +4,12 @@ import { buildProjectMeta } from "@/server/mcp/context";
 import { mcpResponse } from "@/server/mcp/formatters";
 import { optionalMetaOutputSchema } from "@/server/mcp/output-schemas";
 import { withMcpProjectAuth } from "@/server/mcp/project-auth";
+import { formatMcpTable, type McpTableColumn } from "@/server/mcp/table";
 import { projectIdSchema } from "@/server/mcp/schemas";
 import { buildDashboardUrl } from "@/server/mcp/urls";
-import { hasSelfHostedGscConfig } from "@/server/features/gsc/oauth-config";
+import { hasSelfHostedGoogleOAuthConfig } from "@/server/features/google/oauth-config";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
-import {
-  GscNotConnectedError,
-  GscService,
-} from "@/server/features/gsc/services/GscService";
+import { GscService } from "@/server/features/gsc/services/GscService";
 import {
   GSC_DATE_RANGES,
   GSC_DEFAULT_ROW_LIMIT,
@@ -21,10 +19,39 @@ import {
   GSC_SEARCH_TYPES,
   type GscPerformanceInput,
 } from "@/server/features/gsc/searchAnalytics";
-import { GscApiError, GscTokenError } from "@/server/lib/gscClient";
+import {
+  GscApiError,
+  GscNotConnectedError,
+  GscTokenError,
+} from "@/server/lib/gscErrors";
 import { GSC_SELF_HOSTED_SETUP_DOCS_URL } from "@/shared/gsc";
 
 const TEXT_SUMMARY_ROWS = 15;
+
+type GscPerfRow = {
+  keys?: string[];
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position?: number;
+};
+
+const GSC_PERF_COLUMNS: McpTableColumn<GscPerfRow>[] = [
+  { header: "key", value: (row) => row.keys?.join(" / ") ?? "(total)" },
+  { header: "clicks", value: (row) => row.clicks },
+  { header: "impressions", value: (row) => row.impressions },
+  {
+    header: "CTR",
+    value: (row) => row.ctr,
+    format: (value) =>
+      typeof value === "number" ? `${(value * 100).toFixed(1)}%` : "—",
+  },
+  {
+    header: "position",
+    value: (row) => row.position,
+    format: (value) => (typeof value === "number" ? value.toFixed(1) : "—"),
+  },
+];
 
 type ProjectAuthContext = {
   auth: { organizationId: string };
@@ -32,7 +59,9 @@ type ProjectAuthContext = {
 };
 
 function connectGscUrl(baseUrl: string, projectId: string): string {
-  return buildDashboardUrl(baseUrl, `/p/${projectId}/settings#search-console`);
+  // GSC Insights hosts the connection card AND the data the user came for,
+  // so land them there rather than in settings.
+  return buildDashboardUrl(baseUrl, `/p/${projectId}/search-performance`);
 }
 
 /** Self-hosted GSC requires the operator to provide a Google OAuth client and
@@ -44,7 +73,7 @@ async function missingSelfHostedGoogleClientResponse(
 ) {
   const [hosted, configured] = await Promise.all([
     isHostedServerAuthMode(),
-    hasSelfHostedGscConfig(),
+    hasSelfHostedGoogleOAuthConfig(),
   ]);
   if (hosted || configured) return null;
 
@@ -154,7 +183,7 @@ export const getSearchConsolePerformanceTool = {
   config: {
     title: "Get Google Search Console performance",
     description:
-      "Query the connected Search Console property's Search Analytics: clicks, impressions, CTR, and average position by query/page/country/device/date. First-party data — use it for what already ranks, near-ranking queries, and pages with real demand. ctr is a 0-1 fraction; position is a 1-based average; dates are Pacific Time; the last ~3 days may be incomplete. Read-only; uses no credits.",
+      "Query the connected Search Console property's Search Analytics: clicks, impressions, CTR, and average position by query/page/country/device/date. First-party data — use it for what already ranks, near-ranking queries, and pages with real demand. ctr is a 0-1 fraction; position is a 1-based average and is omitted from rows when type is 'discover' or 'googleNews' (Google does not report it there — treat it as unavailable, not a failure); dates are Pacific Time; the last ~3 days may be incomplete. Read-only; uses no credits.",
     inputSchema: perfInputSchema,
     outputSchema: {
       ok: z.boolean(),
@@ -174,7 +203,10 @@ export const getSearchConsolePerformanceTool = {
               clicks: z.number(),
               impressions: z.number(),
               ctr: z.number(),
-              position: z.number(),
+              // Google omits position for the discover and googleNews search
+              // types even though the other metrics are present. The table
+              // already renders a missing position as an em dash.
+              position: z.number().optional(),
             })
             .passthrough(),
         )
@@ -185,7 +217,7 @@ export const getSearchConsolePerformanceTool = {
     },
     annotations: {
       readOnlyHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
       destructiveHint: false,
     },
   },
@@ -200,7 +232,7 @@ export const getSearchConsolePerformanceTool = {
     const meta = buildProjectMeta(
       context,
       args.projectId,
-      `/p/${args.projectId}/settings`,
+      `/p/${args.projectId}/settings/integrations`,
     );
 
     // GSC rejects searchAppearance combined with any other dimension.
@@ -234,17 +266,12 @@ export const getSearchConsolePerformanceTool = {
       const hasMore = rows.length >= requestedLimit;
       const nextStartRow = (result.request.startRow ?? 0) + rows.length;
 
-      const summaryLines = rows.slice(0, TEXT_SUMMARY_ROWS).map((r) => {
-        const label = r.keys?.join(" / ") ?? "(total)";
-        const ctrPct = (r.ctr * 100).toFixed(1);
-        return `  ${label} — ${r.clicks} clicks, ${r.impressions} impr, ${ctrPct}% CTR, pos ${r.position.toFixed(1)}`;
-      });
       const header =
         `${result.siteUrl} · ${dimensions.join("+")} · ${result.request.startDate}→${result.request.endDate} · ` +
         `${rows.length} row${rows.length === 1 ? "" : "s"}${hasMore ? " (more available — paginate with startRow)" : ""}`;
       const text =
-        summaryLines.length > 0
-          ? `${header}\n${summaryLines.join("\n")}${rows.length > summaryLines.length ? `\n  …and ${rows.length - summaryLines.length} more` : ""}`
+        rows.length > 0
+          ? `${header}\n${formatMcpTable(rows, GSC_PERF_COLUMNS)}`
           : `${header}\nNo rows for this query/date range.`;
 
       return mcpResponse({
@@ -326,7 +353,7 @@ export const inspectUrlsTool = {
     },
     annotations: {
       readOnlyHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
       destructiveHint: false,
     },
   },
@@ -341,7 +368,7 @@ export const inspectUrlsTool = {
     const meta = buildProjectMeta(
       context,
       args.projectId,
-      `/p/${args.projectId}/settings`,
+      `/p/${args.projectId}/settings/integrations`,
     );
 
     try {

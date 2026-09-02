@@ -1,11 +1,8 @@
 import { tool, type ToolSet } from "ai";
+import { sort } from "remeda";
 import { z } from "zod";
 import { AppError } from "@/server/lib/errors";
-import {
-  MAX_PAGES,
-  readPages,
-  readSite,
-} from "@/server/features/onboarding/scrape";
+import { MAX_PAGES, readPages, readSite } from "@/server/lib/scrape";
 import { DomainService } from "@/server/features/domain/services/DomainService";
 import { KeywordResearchService } from "@/server/features/keywords/services/KeywordResearchService";
 import { createDataforseoClient } from "@/server/lib/dataforseo";
@@ -148,7 +145,7 @@ function coreSiteTools(ctx: ToolContext): ToolSet {
               {
                 projectId: project.id,
                 domain: project.domain,
-                includeSubdomains: false,
+                scope: "domain",
                 locationCode: project.locationCode,
                 languageCode: project.languageCode,
               },
@@ -229,17 +226,20 @@ function coreSiteTools(ctx: ToolContext): ToolSet {
             "onboarding",
           );
 
-          const keywords = researchResult.rows
-            // Keep only keywords with a real volume — the strategy table shows
-            // volume + KD, so a null-volume row can't be grounded.
-            .filter((row) => row.searchVolume != null)
-            .toSorted((a, b) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0))
-            .map((row) => ({
-              keyword: row.keyword,
-              searchVolume: row.searchVolume,
-              keywordDifficulty: row.keywordDifficulty,
-              intent: row.intent,
-            }));
+          // Keep only keywords with a real volume — the strategy table shows
+          // volume + KD, so a null-volume row can't be grounded.
+          const withVolume = researchResult.rows.filter(
+            (row) => row.searchVolume != null,
+          );
+          const keywords = sort(
+            withVolume,
+            (a, b) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0),
+          ).map((row) => ({
+            keyword: row.keyword,
+            searchVolume: row.searchVolume,
+            keywordDifficulty: row.keywordDifficulty,
+            intent: row.intent,
+          }));
 
           return { available: keywords.length > 0, keywords };
         } catch (error) {

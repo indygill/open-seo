@@ -130,7 +130,6 @@ type Props = {
   projectId: string;
   domain: string;
   locationCode: number;
-  languageCode: string;
   onDone: (configId: string) => void;
   onClose: () => void;
 };
@@ -140,7 +139,6 @@ export function KeywordSuggestionStep({
   projectId,
   domain,
   locationCode,
-  languageCode,
   onDone,
   onClose,
 }: Props) {
@@ -161,18 +159,15 @@ export function KeywordSuggestionStep({
 
   // Ranked-keyword suggestions are Labs-backed; countries served from Google
   // Ads keyword data (e.g. Iceland) have no ranking data to suggest from.
+  // The tracker's language is deliberately not sent — rank tracking can pair
+  // any SERP language with any country, and the server resolves a Labs-served
+  // language for this country (resolveLabsMarket in serverFunctions/domain.ts).
   const labsSupported = isLabsLocationCode(locationCode);
   const suggestionsQuery = useQuery({
-    queryKey: [
-      "domainKeywordSuggestions",
-      projectId,
-      domain,
-      locationCode,
-      languageCode,
-    ],
+    queryKey: ["domainKeywordSuggestions", projectId, domain, locationCode],
     queryFn: () =>
       getDomainKeywordSuggestions({
-        data: { projectId, domain, locationCode, languageCode },
+        data: { projectId, domain, locationCode },
       }),
     enabled: labsSupported,
   });
