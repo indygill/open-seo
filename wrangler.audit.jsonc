@@ -53,14 +53,14 @@
   "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "4abd52f3f2c549ac83cc2cb4ceec8620",
+      "id": "a97c6cf5d8594388af545f574172a43b",
     },
   ],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "open-seo",
-      "database_id": "37bee90a-e1aa-404f-b01e-b0d1d479bda1",
+      "database_name": "open-seo-indygill",
+      "database_id": "97c4c89e-195f-4265-b0a5-f17b08d549bf",
       "migrations_dir": "drizzle",
     },
   ],
@@ -76,7 +76,7 @@
   // ],
   "r2_buckets": [
     {
-      "bucket_name": "open-seo",
+      "bucket_name": "open-seo-indygill",
       "binding": "R2",
     },
   ],
